@@ -1,0 +1,5 @@
+# Variables de entorno
+.env
+credentials.json
+# Node.js
+node_modules/

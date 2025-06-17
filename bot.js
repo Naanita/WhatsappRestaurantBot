@@ -3,19 +3,16 @@ const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const { GoogleSpreadsheet } = require("google-spreadsheet");
 const { JWT } = require("google-auth-library");
-const fs = require("fs");
-const ExcelJS = require("exceljs");
 const creds = require("./credentials.json");
-
-const GOOGLE_SHEET_INFO_ID = "1ZsCxMOkfL1Zlo18jPMSHukuzFA1KrKYTeTauOsPWNP8";
+const path = require("path");
+const fs = require("fs");
 
 const client = new Client({
   puppeteer: { headless: true, args: ["--no-sandbox"] },
-  authStrategy: new LocalAuth({ clientId: "bot2" }),
+  authStrategy: new LocalAuth({ clientId: "bot-sabor-casero" }),
   webVersionCache: {
     type: "remote",
-    remotePath:
-      "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2411.2.html",
+    remotePath: "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2411.2.html",
   },
   authTimeoutMs: 60000,
   qrTimeout: 30000,
@@ -23,649 +20,587 @@ const client = new Client({
 
 const conversationStates = {};
 const userData = {};
-const timeouts = {};
-const messageCounters = {}; // Nuevo: contador de mensajes por usuario
-const adminNumbers = [
-  "573148147148@c.us", // ADMIN1
-  "573148147148@c.us", // ADMIN2
-];
-
-const regionAdminMap = {
-  andina: 0,
-  bogota: 0,
-  medellin: 0,
-  cali: 1,
-  "eje cafetero": 1,
-  costa: 1,
-  santander: 1,
-};
-
-const regiones = [
-  "1. Andina",
-  "2. Bogotá",
-  "3. Cali",
-  "4. Eje Cafetero",
-  "5. Costa",
-  "6. Medellín",
-  "7. Santander",
-];
-
-client.on("qr", (qr) => qrcode.generate(qr, { small: true }));
-client.on("ready", () => console.log("Client is ready!"));
-client.on("authenticated", () => console.log("Client is authenticated!"));
-client.on("auth_failure", (msg) =>
-  console.error("Authentication failure", msg)
-);
-
-function clearTimeouts(from) {
-  if (timeouts[from]) {
-    clearTimeout(timeouts[from].recordatorio);
-    clearTimeout(timeouts[from].finalizacion);
-    delete timeouts[from];
-  }
-}
 
 function getServiceAccountAuth() {
   return new JWT({
     email: creds.client_email,
-    key: creds.private_key.replace(/\\n/g, "\n"),
+    key: creds.private_key.replace(/\\n/g, '\n'),
     scopes: [
-      "https://www.googleapis.com/auth/spreadsheets",
-      "https://www.googleapis.com/auth/drive.file",
+      'https://www.googleapis.com/auth/spreadsheets',
+      'https://www.googleapis.com/auth/drive.file',
     ],
   });
 }
 
-// Nueva función: guarda una fila por conversación
-async function registrarConversacion(numero, cantidadMensajes) {
-  try {
-    const serviceAccountAuth = getServiceAccountAuth();
-    const doc = new GoogleSpreadsheet(GOOGLE_SHEET_INFO_ID, serviceAccountAuth);
-    await doc.loadInfo();
-    const sheet = doc.sheetsByIndex[0];
-    await sheet.loadHeaderRow();
+async function getMenuSheet() {
+  const serviceAccountAuth = getServiceAccountAuth();
+  const doc = new GoogleSpreadsheet(process.env.GOOGLE_MENU, serviceAccountAuth);
+  await doc.loadInfo();
+  return doc;
+}
 
-    const ahora = new Date();
-    const fechaHora =
-      ahora.getFullYear() +
-      "-" +
-      String(ahora.getMonth() + 1).padStart(2, "0") +
-      "-" +
-      String(ahora.getDate()).padStart(2, "0") +
-      " " +
-      String(ahora.getHours()).padStart(2, "0") +
-      ":" +
-      String(ahora.getMinutes()).padStart(2, "0");
+function formatPrice(price) {
+  if (!price) return "";
+  let num = price.toString().replace(/\D/g, "");
+  if (!num) return "";
+  return "$ " + Number(num).toLocaleString("es-CO");
+}
 
-    await sheet.addRow({
-      Numero: numero,
-      "Intentos hasta la solución": cantidadMensajes,
-      "Horas de Inicio": fechaHora,
-    });
-  } catch (error) {
-    console.error("Error guardando conversación:", error);
+function resetConversation(from) {
+  conversationStates[from] = null;
+  userData[from] = {};
+}
+
+function generateOrderCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return `ORDEN-${code}`;
+}
+
+function getDeliveryTime() {
+  const now = new Date();
+  const hour = now.getHours();
+  if (hour >= 11 && hour < 16) return 20;
+  if (hour >= 17 && hour < 21) return 40;
+  return 40;
+}
+
+function getCartSummary(cart) {
+  let lines = [];
+  let total = 0;
+  cart.forEach(item => {
+    const subtotal = item.price * item.qty;
+    total += subtotal;
+    lines.push(`${item.qty}x ${item.name}: ${formatPrice(subtotal)}`);
+  });
+  return { lines, total };
+}
+
+async function sendWelcomeImage(from) {
+  // Puedes poner la ruta de tu logo aquí
+  const logoPath = path.join(__dirname, "logo.jpg");
+  if (fs.existsSync(logoPath)) {
+    const media = MessageMedia.fromFilePath(logoPath);
+    await client.sendMessage(from, media, { caption: "¡Bienvenido a Sabor Casero!" });
   }
 }
 
-async function buscarEnGoogleSheets(nit, codigo = null) {
-  try {
-    const serviceAccountAuth = getServiceAccountAuth();
-    const doc = new GoogleSpreadsheet(
-      process.env.GOOGLE_SHEET_ID,
-      serviceAccountAuth
-    );
-    await doc.loadInfo();
-    const sheet = doc.sheetsByIndex[0];
-    const rows = await sheet.getRows();
-
-    const filasNit = rows.filter((row) => {
-      const rowNit = row._rawData[0] ? row._rawData[0].toString().trim() : "";
-      return rowNit === nit.toString().trim();
-    });
-
-    if (filasNit.length === 0) {
-      return null;
-    }
-
-    if (!codigo) {
-      const rowNombre = filasNit[0]._rawData[2]
-        ? filasNit[0]._rawData[2].toString().trim()
-        : "";
-      return { nombre: rowNombre };
-    }
-
-    const filaCodigo = filasNit.find((row) => {
-      const rowCodigo = row._rawData[1]
-        ? row._rawData[1].toString().trim()
-        : "";
-      return rowCodigo === codigo.toString().trim();
-    });
-
-    if (!filaCodigo) {
-      return null;
-    }
-
-    const rowNombre = filaCodigo._rawData[2]
-      ? filaCodigo._rawData[2].toString().trim()
-      : "";
-    return { nombre: rowNombre };
-  } catch (error) {
-    console.error("Error buscando en Google Sheets:", error);
-    throw new Error("No se pudo conectar con la hoja de cálculo.");
-  }
-}
-
-async function enviarEstadoCuentaPersonalizado(from, nit, codigo) {
-  try {
-    const serviceAccountAuth = getServiceAccountAuth();
-    const doc = new GoogleSpreadsheet(
-      process.env.GOOGLE_SHEET_ID,
-      serviceAccountAuth
-    );
-    await doc.loadInfo();
-    const sheet = doc.sheetsByIndex[0];
-    const rows = await sheet.getRows();
-
-    const datosFiltrados = rows.filter(
-      (row) =>
-        (row._rawData[0] ? row._rawData[0].toString().trim() : "") ===
-          nit.toString().trim() &&
-        (row._rawData[1] ? row._rawData[1].toString().trim() : "") ===
-          codigo.toString().trim()
-    );
-
-    if (datosFiltrados.length === 0) {
-      await client.sendMessage(
-        from,
-        "No se encontraron datos para tu NIT y código."
-      );
-      return;
-    }
-
-    let nombre = datosFiltrados[0]._rawData[2] || "usuario";
-    nombre = nombre.replace(/[^a-zA-Z0-9_\-]/g, "_");
-
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("Estado de Cuenta");
-
-    const headers = [
-      "Name 1",
-      "Invoice number",
-      "CO E-Invoice No.",
-      "Outstanding balance",
-      "Billing Date",
-      "Due date",
-      "Days overdue",
-    ];
-    worksheet.addRow(headers);
-
-    worksheet.getRow(1).eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "d01e26" },
-      };
-      cell.alignment = {
-        vertical: "middle",
-        horizontal: "center",
-        wrapText: true,
-      };
-      cell.border = {
-        top: { style: "thin" },
-        left: { style: "thin" },
-        bottom: { style: "thin" },
-        right: { style: "thin" },
-      };
-    });
-
-    datosFiltrados.forEach((row) => {
-      worksheet.addRow([
-        row._rawData[2] || "",
-        row._rawData[3] || "",
-        row._rawData[4] || "",
-        row._rawData[9] || "",
-        row._rawData[10] || "",
-        row._rawData[11] || "",
-        row._rawData[12] || "",
-      ]);
-    });
-
-    worksheet.columns.forEach((column) => {
-      let maxLength = 0;
-      column.eachCell({ includeEmpty: true }, (cell) => {
-        const cellValue = cell.value ? cell.value.toString() : "";
-        maxLength = Math.max(maxLength, cellValue.length);
-      });
-      column.width = maxLength < 15 ? 15 : maxLength + 2;
-    });
-
-    const filePath = `./estado_cuenta_${nombre}.xlsx`;
-    await workbook.xlsx.writeFile(filePath);
-
-    const fileBuffer = fs.readFileSync(filePath);
-    const media = new MessageMedia(
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      fileBuffer.toString("base64"),
-      `estado_cuenta_${nombre}.xlsx`
-    );
-
-    await client.sendMessage(from, media, {
-      caption: "*Aquí tienes tu estado de cuenta!*",
-    });
-
-    fs.unlinkSync(filePath);
-  } catch (error) {
-    console.error("Error enviando estado de cuenta:", error);
-    await client.sendMessage(
-      from,
-      "Ocurrió un error generando o enviando tu estado de cuenta. Intenta más tarde."
-    );
-  }
-}
+client.on("qr", (qr) => qrcode.generate(qr, { small: true }));
+client.on("ready", () => console.log("Client is ready!"));
+client.on("authenticated", () => console.log("Client is authenticated!"));
+client.on("auth_failure", (msg) => console.error("Authentication failure", msg));
 
 client.on("message", async (msg) => {
   const from = msg.from;
   const body = msg.body.trim();
-  const numero = from.replace(/@c\.us$/, "");
 
-  // Nuevo: contar mensajes por usuario
-  if (!messageCounters[from]) messageCounters[from] = 0;
-  messageCounters[from]++;
-
-  // Solo inicia el flujo si no está activo
-  if (!conversationStates[from] || conversationStates[from] === "ended") {
-    conversationStates[from] = "menu_inicial";
-    clearTimeouts(from);
-    try {
-      const media = MessageMedia.fromFilePath("./HIKSTATEMENT.png");
-      await client.sendMessage(from, media, {
-        caption: "¡Hola! 👋 Soy *HikStatement*.",
-      });
-    } catch (e) {
-      console.error("No se pudo enviar la imagen de bienvenida:", e);
-      await client.sendMessage(from, "¡Hola! 👋 Soy *HikStatement*.");
-    }
-    await client.sendMessage(
-      from,
-      "*¿Qué quieres hacer?*\n\n*1.* Descargar estado de cuenta.\n*2.* Otra solicitud"
+  // Inicia conversación si no hay estado
+  if (!conversationStates[from]) {
+    resetConversation(from);
+    conversationStates[from] = "inicio";
+    userData[from] = { cart: [], step: "inicio" };
+    await sendWelcomeImage(from);
+    await client.sendMessage(from,
+      "¡Hola! 👋 Bienvenido a *Sabor Casero*.\n¿En qué te puedo ayudar hoy?\n\n" +
+      "*1.* Ordenar 🍔\n*2.* ¿Dónde estamos ubicados? 📍\n*3.* Estado de mi pedido 🚚"
     );
-    timeouts[from] = {
-      recordatorio: setTimeout(async () => {
-        if (conversationStates[from] === "menu_inicial") {
-          await client.sendMessage(from, "¿Estás ahí?");
-          timeouts[from].finalizacion = setTimeout(async () => {
-            if (conversationStates[from] === "menu_inicial") {
-              await client.sendMessage(
-                from,
-                "Chat finalizado por inactividad. Escribe cualquier mensaje para iniciar de nuevo."
-              );
-              conversationStates[from] = "ended";
-              clearTimeouts(from);
-              // Guardar conversación al finalizar
-              await registrarConversacion(numero, messageCounters[from]);
-              delete messageCounters[from];
-            }
-          }, 2400000);
-        }
-      }, 2400000),
-    };
-    if (!userData[from]) userData[from] = {};
     return;
   }
 
   try {
-    // Menú inicial con opciones
-    if (conversationStates[from] === "menu_inicial") {
-      clearTimeouts(from);
-      if (body === "1") {
-        conversationStates[from] = "esperando_nit";
-        await client.sendMessage(from, "Por favor, digita tu número de *NIT*");
-        timeouts[from] = {
-          recordatorio: setTimeout(async () => {
-            if (conversationStates[from] === "esperando_nit") {
-              await client.sendMessage(from, "¿Estás ahí?");
-              timeouts[from].finalizacion = setTimeout(async () => {
-                if (conversationStates[from] === "esperando_nit") {
-                  await client.sendMessage(
-                    from,
-                    "Chat finalizado por inactividad. Escribe cualquier mensaje para iniciar de nuevo."
-                  );
-                  conversationStates[from] = "ended";
-                  clearTimeouts(from);
-                  await registrarConversacion(numero, messageCounters[from]);
-                  delete messageCounters[from];
-                }
-              }, 2400000);
-            }
-          }, 2400000),
-        };
-      } else if (body === "2") {
-        conversationStates[from] = "seleccionando_region";
-        const mensajeRegiones =
-          "*Por favor, elige la región donde te encuentras:*\n\n" +
-          regiones.join("\n");
-        await client.sendMessage(from, mensajeRegiones);
-        timeouts[from] = {
-          recordatorio: setTimeout(async () => {
-            if (conversationStates[from] === "seleccionando_region") {
-              await client.sendMessage(from, "¿Estás ahí?");
-              timeouts[from].finalizacion = setTimeout(async () => {
-                if (conversationStates[from] === "seleccionando_region") {
-                  await client.sendMessage(
-                    from,
-                    "Chat finalizado por inactividad. Escribe cualquier mensaje para iniciar de nuevo."
-                  );
-                  conversationStates[from] = "ended";
-                  clearTimeouts(from);
-                  await registrarConversacion(numero, messageCounters[from]);
-                  delete messageCounters[from];
-                }
-              }, 2400000);
-            }
-          }, 2400000),
-        };
-      } else {
-        await client.sendMessage(
-          from,
-          "Opción no válida. Por favor, responde con *1* para descargar el estado de cuenta o *2* para otra solicitud."
-        );
-      }
-      return;
-    }
+    const state = conversationStates[from];
+    const data = userData[from];
 
-    // Selección de región
-    if (conversationStates[from] === "seleccionando_region") {
-      clearTimeouts(from);
-      const opcion = parseInt(body);
-      if (opcion >= 1 && opcion <= 7) {
-        const regionesNombres = [
-          "andina",
-          "bogota",
-          "cali",
-          "eje cafetero",
-          "costa",
-          "medellin",
-          "santander",
-        ];
-        const regionSeleccionada = regionesNombres[opcion - 1];
-        userData[from].region = regionSeleccionada;
-        if (
-          userData[from].nit &&
-          userData[from].codigo &&
-          userData[from].nombre
-        ) {
-          conversationStates[from] = "esperando_solicitud";
-          await client.sendMessage(from, "Por favor, escribe tu solicitud:");
-        } else {
-          conversationStates[from] = "esperando_nit_solicitud";
-          await client.sendMessage(
-            from,
-            "Por favor, digita tu número de *NIT*"
-          );
+    // INICIO
+    if (state === "inicio") {
+      if (body === "1") {
+        // Iniciar pedido
+        data.cart = [];
+        data.step = "menu";
+        conversationStates[from] = "menu";
+        // Mostrar menú principal
+        const doc = await getMenuSheet();
+        const sheet = doc.sheetsByTitle["MenuPrincipal"];
+        if (!sheet) {
+          await client.sendMessage(from, "No se encontró la hoja 'MenuPrincipal' en el menú. Por favor, contacta al administrador.");
+          resetConversation(from);
+          return;
         }
-      } else {
-        await client.sendMessage(
-          from,
-          "Opción no válida. Por favor, selecciona un número del 1 al 7."
-        );
-      }
-      return;
-    }
-
-    // Esperando NIT para solicitud (opción 2)
-    if (conversationStates[from] === "esperando_nit_solicitud") {
-      clearTimeouts(from);
-      const nit = body;
-      let resultado;
-      try {
-        resultado = await buscarEnGoogleSheets(nit);
-      } catch (error) {
-        await client.sendMessage(
-          from,
-          error.message || "Ocurrió un error buscando tu NIT."
-        );
-        conversationStates[from] = "ended";
-        await registrarConversacion(numero, messageCounters[from]);
-        delete messageCounters[from];
+        const rows = await sheet.getRows();
+        data.menuPrincipal = rows.map(r => ({
+          name: r._rawData[0],
+          price: Number(r._rawData[1])
+        }));
+        let menuMsg = "¡Excelente! Aquí tienes nuestro menú principal:\n";
+        data.menuPrincipal.forEach((item, i) => {
+          menuMsg += `*${i + 1}.* ${item.name} - ${formatPrice(item.price)}\n`;
+        });
+        menuMsg += "\n*0.* Cancelar";
+        await client.sendMessage(from, menuMsg);
         return;
-      }
-      if (resultado) {
-        userData[from].nit = nit;
-        userData[from].nombre = resultado.nombre;
-        conversationStates[from] = "esperando_codigo_solicitud";
-        await client.sendMessage(
-          from,
-          `¡Hola, *${resultado.nombre}*! Por favor, ingresa tu *código de cliente*`
-        );
-      } else {
-        await client.sendMessage(
-          from,
-          "NIT no encontrado o no autorizado. Intenta de nuevo o escribe cualquier mensaje para reiniciar."
-        );
-        conversationStates[from] = "ended";
-        await registrarConversacion(numero, messageCounters[from]);
-        delete messageCounters[from];
-      }
-      return;
-    }
-
-    // Esperando código de cliente para solicitud (opción 2)
-    if (conversationStates[from] === "esperando_codigo_solicitud") {
-      clearTimeouts(from);
-      const codigo = body;
-      const nit = userData[from]?.nit;
-      let resultado;
-      try {
-        resultado = await buscarEnGoogleSheets(nit, codigo);
-      } catch (error) {
-        await client.sendMessage(
-          from,
-          error.message || "Ocurrió un error validando tu código."
-        );
-        conversationStates[from] = "ended";
-        await registrarConversacion(numero, messageCounters[from]);
-        delete messageCounters[from];
-        return;
-      }
-      if (resultado) {
-        userData[from].codigo = codigo;
-        userData[from].nombre = resultado.nombre;
-        conversationStates[from] = "esperando_solicitud";
-        await client.sendMessage(from, "Por favor, escribe tu solicitud:");
-      } else {
-        await client.sendMessage(
-          from,
-          "Código incorrecto. Intenta de nuevo o escribe cualquier mensaje para reiniciar."
-        );
-        conversationStates[from] = "ended";
-        await registrarConversacion(numero, messageCounters[from]);
-        delete messageCounters[from];
-      }
-      return;
-    }
-
-    // Esperando NIT para estado de cuenta
-    if (conversationStates[from] === "esperando_nit") {
-      clearTimeouts(from);
-      const nit = body;
-      let resultado;
-      try {
-        resultado = await buscarEnGoogleSheets(nit);
-      } catch (error) {
-        await client.sendMessage(
-          from,
-          error.message || "Ocurrió un error buscando tu NIT."
-        );
-        conversationStates[from] = "ended";
-        await registrarConversacion(numero, messageCounters[from]);
-        delete messageCounters[from];
-        return;
-      }
-      if (resultado) {
-        userData[from].nit = nit;
-        userData[from].nombre = resultado.nombre;
-        conversationStates[from] = "esperando_codigo";
-        await client.sendMessage(
-          from,
-          `¡Hola, *${resultado.nombre}!* Por favor, ingresa tu *código de cliente*`
-        );
-        timeouts[from] = {
-          recordatorio: setTimeout(async () => {
-            if (conversationStates[from] === "esperando_codigo") {
-              await client.sendMessage(from, "¿Estás ahí?");
-              timeouts[from].finalizacion = setTimeout(async () => {
-                if (conversationStates[from] === "esperando_codigo") {
-                  await client.sendMessage(
-                    from,
-                    "Chat finalizado por inactividad. Escribe cualquier mensaje para iniciar de nuevo."
-                  );
-                  conversationStates[from] = "ended";
-                  clearTimeouts(from);
-                  await registrarConversacion(numero, messageCounters[from]);
-                  delete messageCounters[from];
-                }
-              }, 2400000);
-            }
-          }, 2400000),
-        };
-      } else {
-        await client.sendMessage(
-          from,
-          "NIT no encontrado o no autorizado. Intenta de nuevo o escribe cualquier mensaje para reiniciar."
-        );
-        conversationStates[from] = "ended";
-        await registrarConversacion(numero, messageCounters[from]);
-        delete messageCounters[from];
-      }
-      return;
-    }
-
-    // Esperando código de verificación para estado de cuenta
-    if (conversationStates[from] === "esperando_codigo") {
-      clearTimeouts(from);
-      const codigo = body;
-      const nit = userData[from]?.nit;
-      let resultado;
-      try {
-        resultado = await buscarEnGoogleSheets(nit, codigo);
-      } catch (error) {
-        await client.sendMessage(
-          from,
-          error.message || "Ocurrió un error validando tu código."
-        );
-        conversationStates[from] = "ended";
-        await registrarConversacion(numero, messageCounters[from]);
-        delete messageCounters[from];
-        return;
-      }
-      if (resultado) {
-        userData[from].codigo = codigo;
-        userData[from].nombre = resultado.nombre;
-        await enviarEstadoCuentaPersonalizado(
-          from,
-          userData[from].nit,
-          userData[from].codigo
-        );
-        conversationStates[from] = "menu_post_estado";
-        await client.sendMessage(
-          from,
-          "*¿Deseas realizar otra solicitud?*\n\n*1.* Sí, otra solicitud\n*2.* Terminar chat"
-        );
-      } else {
-        await client.sendMessage(
-          from,
-          "Código incorrecto. Intenta de nuevo o escribe cualquier mensaje para reiniciar."
-        );
-        conversationStates[from] = "ended";
-        await registrarConversacion(numero, messageCounters[from]);
-        delete messageCounters[from];
-      }
-      return;
-    }
-
-    // Menú después de entregar estado de cuenta
-    if (conversationStates[from] === "menu_post_estado") {
-      clearTimeouts(from);
-      if (body === "1") {
-        conversationStates[from] = "seleccionando_region";
-        const mensajeRegiones =
-          "*Por favor, elige la región donde te encuentras:*\n\n" +
-          regiones.join("\n");
-        await client.sendMessage(from, mensajeRegiones);
       } else if (body === "2") {
-        conversationStates[from] = "ended";
-        await client.sendMessage(
-          from,
-          "¡Gracias por contactarnos! Si necesitas algo más, escribe cualquier mensaje para iniciar de nuevo."
-        );
-        await registrarConversacion(numero, messageCounters[from]);
-        delete messageCounters[from];
+        await client.sendMessage(from, "Estamos ubicados en Calle 123 #45-67, Barrio Centro, Ciudad.\n¡Te esperamos!");
+        resetConversation(from);
+        return;
+      } else if (body === "3") {
+        await client.sendMessage(from, "Por favor, indícanos tu número de orden para consultar el estado.");
+        resetConversation(from);
+        return;
       } else {
-        await client.sendMessage(
-          from,
-          "Opción no válida. Responde con *1* para otra solicitud o *2* para terminar el chat."
-        );
+        await client.sendMessage(from, "Por favor, selecciona una opción válida (1, 2 o 3).");
+        return;
       }
+    }
+
+    // MENÚ PRINCIPAL
+    if (state === "menu") {
+      if (body === "0") {
+        await client.sendMessage(from, "Pedido cancelado. Escribe cualquier mensaje para empezar de nuevo.");
+        resetConversation(from);
+        return;
+      }
+      const idx = parseInt(body) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= data.menuPrincipal.length) {
+        await client.sendMessage(from, "Opción inválida. Por favor selecciona un número del menú.");
+        return;
+      }
+      data.selectedItem = data.menuPrincipal[idx];
+      conversationStates[from] = "cantidad_menu";
+      await client.sendMessage(from, `Perfecto, ¿cuántas unidades de *${data.selectedItem.name}* deseas?`);
       return;
     }
 
-    // Esperando texto de solicitud (para ambas opciones)
-    if (conversationStates[from] === "esperando_solicitud") {
-      clearTimeouts(from);
-      userData[from].solicitud = body;
-      conversationStates[from] = "ended";
+    // CANTIDAD MENÚ PRINCIPAL
+    if (state === "cantidad_menu") {
+      const qty = parseInt(body);
+      if (isNaN(qty) || qty <= 0) {
+        await client.sendMessage(from, "Por favor, ingresa una cantidad válida (número mayor a 0).");
+        return;
+      }
+      data.cart.push({
+        name: data.selectedItem.name,
+        price: data.selectedItem.price,
+        qty,
+        type: "menu"
+      });
+      data.selectedItem = null;
+      conversationStates[from] = "agregar_menu";
+      await client.sendMessage(from, "¿Deseas ordenar otro plato de nuestro menú principal? (Sí / No)");
+      return;
+    }
 
-      const solicitud = userData[from].solicitud;
-      const region = userData[from].region;
-      const numero = from.replace(/@c\.us$/, "");
-      let nombre = userData[from].nombre || "";
-      let codigoCliente = userData[from].codigo || "";
+    // AGREGAR MÁS DEL MENÚ PRINCIPAL
+    if (state === "agregar_menu") {
+      if (/^si$/i.test(body)) {
+        conversationStates[from] = "menu";
+        // Mostrar menú principal de nuevo
+        let menuMsg = "Aquí tienes nuestro menú principal:\n";
+        data.menuPrincipal.forEach((item, i) => {
+          menuMsg += `*${i + 1}.* ${item.name} - ${formatPrice(item.price)}\n`;
+        });
+        menuMsg += "\n*0.* Cancelar";
+        await client.sendMessage(from, menuMsg);
+        return;
+      } else if (/^no$/i.test(body)) {
+        // Ofrecer bebidas
+        conversationStates[from] = "ofrecer_bebidas";
+        await client.sendMessage(from, "¿Te gustaría acompañar tu pedido con alguna bebida? (Sí / No)");
+        return;
+      } else {
+        await client.sendMessage(from, "Por favor responde 'Sí' o 'No'.");
+        return;
+      }
+    }
 
-      const resumen = `*¡Gracias!*\nPronto nos pondremos en contacto contigo.\n\n*Solicitud enviada:*\n\`\`\`\n${solicitud}\n\`\`\``;
+    // OFRECER BEBIDAS
+    if (state === "ofrecer_bebidas") {
+      if (/^si$/i.test(body)) {
+        // Mostrar bebidas
+        const doc = await getMenuSheet();
+        const sheet = doc.sheetsByTitle["Bebidas"];
+        if (!sheet) {
+          await client.sendMessage(from, "No se encontró la hoja 'Bebidas' en el menú. Por favor, contacta al administrador.");
+          conversationStates[from] = "ofrecer_adiciones";
+          await client.sendMessage(from, "¿Quisieras agregar alguna adición a tu orden? (Papas, ensalada extra, etc.) (Sí / No)");
+          return;
+        }
+        const rows = await sheet.getRows();
+        data.bebidas = rows.map(r => ({
+          name: r._rawData[0],
+          price: Number(r._rawData[1])
+        }));
+        let bebidasMsg = "Estas son nuestras bebidas:\n";
+        data.bebidas.forEach((item, i) => {
+          bebidasMsg += `*${i + 1}.* ${item.name} - ${formatPrice(item.price)}\n`;
+        });
+        bebidasMsg += "\n*0.* No añadir bebidas";
+        conversationStates[from] = "bebidas";
+        await client.sendMessage(from, bebidasMsg);
+        return;
+      } else if (/^no$/i.test(body)) {
+        conversationStates[from] = "ofrecer_adiciones";
+        await client.sendMessage(from, "¿Quisieras agregar alguna adición a tu orden? (Papas, ensalada extra, etc.) (Sí / No)");
+        return;
+      } else {
+        await client.sendMessage(from, "Por favor responde 'Sí' o 'No'.");
+        return;
+      }
+    }
+
+    // SELECCIÓN DE BEBIDAS
+    if (state === "bebidas") {
+      if (body === "0") {
+        conversationStates[from] = "ofrecer_adiciones";
+        await client.sendMessage(from, "¿Quisieras agregar alguna adición a tu orden? (Papas, ensalada extra, etc.) (Sí / No)");
+        return;
+      }
+      const idx = parseInt(body) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= data.bebidas.length) {
+        await client.sendMessage(from, "Opción inválida. Por favor selecciona una bebida válida.");
+        return;
+      }
+      data.selectedBebida = data.bebidas[idx];
+      conversationStates[from] = "cantidad_bebida";
+      await client.sendMessage(from, `¿Cuántas unidades de *${data.selectedBebida.name}* deseas?`);
+      return;
+    }
+
+    // CANTIDAD BEBIDA
+    if (state === "cantidad_bebida") {
+      const qty = parseInt(body);
+      if (isNaN(qty) || qty <= 0) {
+        await client.sendMessage(from, "Por favor, ingresa una cantidad válida (número mayor a 0).");
+        return;
+      }
+      data.cart.push({
+        name: data.selectedBebida.name,
+        price: data.selectedBebida.price,
+        qty,
+        type: "bebida"
+      });
+      data.selectedBebida = null;
+      conversationStates[from] = "agregar_bebida";
+      await client.sendMessage(from, "¿Deseas añadir otra bebida? (Sí / No)");
+      return;
+    }
+
+    // AGREGAR MÁS BEBIDAS
+    if (state === "agregar_bebida") {
+      if (/^si$/i.test(body)) {
+        // Mostrar bebidas de nuevo
+        let bebidasMsg = "Estas son nuestras bebidas:\n";
+        data.bebidas.forEach((item, i) => {
+          bebidasMsg += `*${i + 1}.* ${item.name} - ${formatPrice(item.price)}\n`;
+        });
+        bebidasMsg += "\n*0.* No añadir más bebidas";
+        conversationStates[from] = "bebidas";
+        await client.sendMessage(from, bebidasMsg);
+        return;
+      } else if (/^no$/i.test(body)) {
+        conversationStates[from] = "ofrecer_adiciones";
+        await client.sendMessage(from, "¿Quisieras agregar alguna adición a tu orden? (Papas, ensalada extra, etc.) (Sí / No)");
+        return;
+      } else {
+        await client.sendMessage(from, "Por favor responde 'Sí' o 'No'.");
+        return;
+      }
+    }
+
+    // OFRECER ADICIONES
+    if (state === "ofrecer_adiciones") {
+      if (/^si$/i.test(body)) {
+        // Mostrar adiciones
+        const doc = await getMenuSheet();
+        const sheet = doc.sheetsByTitle["Adiciones"];
+        if (!sheet) {
+          await client.sendMessage(from, "No se encontró la hoja 'Adiciones' en el menú. Por favor, contacta al administrador.");
+          // Mostrar resumen directamente
+          conversationStates[from] = "resumen";
+          const { lines, total } = getCartSummary(data.cart);
+          let resumen = "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
+          resumen += lines.join("\n") + `\n\nTOTAL: ${formatPrice(total)}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
+          await client.sendMessage(from, resumen);
+          return;
+        }
+        const rows = await sheet.getRows();
+        data.adiciones = rows.map(r => ({
+          name: r._rawData[0],
+          price: Number(r._rawData[1])
+        }));
+        let adicionesMsg = "Estas son nuestras adiciones:\n";
+        data.adiciones.forEach((item, i) => {
+          adicionesMsg += `*${i + 1}.* ${item.name} - ${formatPrice(item.price)}\n`;
+        });
+        adicionesMsg += "\n*0.* No añadir adiciones";
+        conversationStates[from] = "adiciones";
+        await client.sendMessage(from, adicionesMsg);
+        return;
+      } else if (/^no$/i.test(body)) {
+        // Mostrar resumen
+        conversationStates[from] = "resumen";
+        const { lines, total } = getCartSummary(data.cart);
+        let resumen = "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
+        resumen += lines.join("\n") + `\n\nTOTAL: ${formatPrice(total)}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
+        await client.sendMessage(from, resumen);
+        return;
+      } else {
+        await client.sendMessage(from, "Por favor responde 'Sí' o 'No'.");
+        return;
+      }
+    }
+
+    // SELECCIÓN DE ADICIONES
+    if (state === "adiciones") {
+      if (body === "0") {
+        conversationStates[from] = "resumen";
+        const { lines, total } = getCartSummary(data.cart);
+        let resumen = "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
+        resumen += lines.join("\n") + `\n\nTOTAL: ${formatPrice(total)}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
+        await client.sendMessage(from, resumen);
+        return;
+      }
+      const idx = parseInt(body) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= data.adiciones.length) {
+        await client.sendMessage(from, "Opción inválida. Por favor selecciona una adición válida.");
+        return;
+      }
+      data.selectedAdicion = data.adiciones[idx];
+      conversationStates[from] = "cantidad_adicion";
+      await client.sendMessage(from, `¿Cuántas unidades de *${data.selectedAdicion.name}* deseas?`);
+      return;
+    }
+
+    // CANTIDAD ADICIÓN
+    if (state === "cantidad_adicion") {
+      const qty = parseInt(body);
+      if (isNaN(qty) || qty <= 0) {
+        await client.sendMessage(from, "Por favor, ingresa una cantidad válida (número mayor a 0).");
+        return;
+      }
+      data.cart.push({
+        name: data.selectedAdicion.name,
+        price: data.selectedAdicion.price,
+        qty,
+        type: "adicion"
+      });
+      data.selectedAdicion = null;
+      conversationStates[from] = "agregar_adicion";
+      await client.sendMessage(from, "¿Deseas añadir otra adición? (Sí / No)");
+      return;
+    }
+
+    // AGREGAR MÁS ADICIONES
+    if (state === "agregar_adicion") {
+      if (/^si$/i.test(body)) {
+        // Mostrar adiciones de nuevo
+        let adicionesMsg = "Estas son nuestras adiciones:\n";
+        data.adiciones.forEach((item, i) => {
+          adicionesMsg += `*${i + 1}.* ${item.name} - ${formatPrice(item.price)}\n`;
+        });
+        adicionesMsg += "\n*0.* No añadir más adiciones";
+        conversationStates[from] = "adiciones";
+        await client.sendMessage(from, adicionesMsg);
+        return;
+      } else if (/^no$/i.test(body)) {
+        conversationStates[from] = "resumen";
+        const { lines, total } = getCartSummary(data.cart);
+        let resumen = "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
+        resumen += lines.join("\n") + `\n\nTOTAL: ${formatPrice(total)}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
+        await client.sendMessage(from, resumen);
+        return;
+      } else {
+        await client.sendMessage(from, "Por favor responde 'Sí' o 'No'.");
+        return;
+      }
+    }
+
+    // RESUMEN Y OPCIONES DEL PEDIDO
+    if (state === "resumen") {
+      if (body === "1") {
+        // Modificar pedido
+        if (!data.cart.length) {
+          await client.sendMessage(from, "Tu carrito está vacío.");
+          return;
+        }
+        let modMsg = "¿Qué ítem deseas modificar?\n";
+        data.cart.forEach((item, i) => {
+          modMsg += `*${i + 1}.* ${item.qty}x ${item.name}\n`;
+        });
+        modMsg += "\n*0.* Cancelar";
+        conversationStates[from] = "modificar";
+        await client.sendMessage(from, modMsg);
+        return;
+      } else if (body === "2") {
+        conversationStates[from] = "instrucciones";
+        await client.sendMessage(from, "Por favor, escribe tus instrucciones (ej. 'Sin azúcar', 'sin arroz', 'mucha salsa', etc.).");
+        return;
+      } else if (body === "3") {
+        conversationStates[from] = "nombre";
+        await client.sendMessage(from, "Para finalizar, ¿a nombre de quién registramos el pedido?");
+        return;
+      } else {
+        await client.sendMessage(from, "Por favor selecciona una opción válida (1, 2 o 3).");
+        return;
+      }
+    }
+
+    // MODIFICAR PEDIDO
+    if (state === "modificar") {
+      if (body === "0") {
+        conversationStates[from] = "resumen";
+        const { lines, total } = getCartSummary(data.cart);
+        let resumen = "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
+        resumen += lines.join("\n") + `\n\nTOTAL: ${formatPrice(total)}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
+        await client.sendMessage(from, resumen);
+        return;
+      }
+      const idx = parseInt(body) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= data.cart.length) {
+        await client.sendMessage(from, "Opción inválida. Por favor selecciona un ítem válido.");
+        return;
+      }
+      data.modificarIdx = idx;
+      conversationStates[from] = "modificar_opcion";
+      await client.sendMessage(from, `¿Qué deseas hacer con *${data.cart[idx].name}*?\n\na) Cambiar cantidad\nb) Eliminar del pedido`);
+      return;
+    }
+
+    // OPCIÓN DE MODIFICACIÓN
+    if (state === "modificar_opcion") {
+      if (/^a$/i.test(body)) {
+        conversationStates[from] = "modificar_cantidad";
+        await client.sendMessage(from, `¿Cuál es la nueva cantidad para *${data.cart[data.modificarIdx].name}*?`);
+        return;
+      } else if (/^b$/i.test(body)) {
+        data.cart.splice(data.modificarIdx, 1);
+        data.modificarIdx = null;
+        conversationStates[from] = "resumen";
+        const { lines, total } = getCartSummary(data.cart);
+        let resumen = "¡Listo! ✨ Aquí está el resumen de tu pedido actualizado:\n\n";
+        resumen += lines.join("\n") + `\n\nTOTAL: ${formatPrice(total)}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
+        await client.sendMessage(from, resumen);
+        return;
+      } else {
+        await client.sendMessage(from, "Por favor responde 'a' para cambiar cantidad o 'b' para eliminar.");
+        return;
+      }
+    }
+
+    // CAMBIAR CANTIDAD DE ÍTEM
+    if (state === "modificar_cantidad") {
+      const qty = parseInt(body);
+      if (isNaN(qty) || qty <= 0) {
+        await client.sendMessage(from, "Por favor, ingresa una cantidad válida (número mayor a 0).");
+        return;
+      }
+      data.cart[data.modificarIdx].qty = qty;
+      data.modificarIdx = null;
+      conversationStates[from] = "resumen";
+      const { lines, total } = getCartSummary(data.cart);
+      let resumen = "¡Listo! ✨ Aquí está el resumen de tu pedido actualizado:\n\n";
+      resumen += lines.join("\n") + `\n\nTOTAL: ${formatPrice(total)}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
+      await client.sendMessage(from, resumen);
+      return;
+    }
+
+    // INSTRUCCIONES ESPECIALES
+    if (state === "instrucciones") {
+      data.instrucciones = body;
+      conversationStates[from] = "resumen";
+      const { lines, total } = getCartSummary(data.cart);
+      let resumen = "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
+      resumen += lines.join("\n") + `\n\nTOTAL: ${formatPrice(total)}\n`;
+      resumen += `\n*Instrucciones especiales:* "${data.instrucciones}"\n`;
+      resumen += "\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅";
+      await client.sendMessage(from, resumen);
+      return;
+    }
+
+    // NOMBRE DEL CLIENTE
+    if (state === "nombre") {
+      data.nombre = body;
+      conversationStates[from] = "direccion";
+      await client.sendMessage(from, `¡Gracias, ${data.nombre}! Ahora, por favor, indícame la dirección completa para la entrega.`);
+      return;
+    }
+
+    // DIRECCIÓN DE ENTREGA
+    if (state === "direccion") {
+      data.direccion = body;
+      conversationStates[from] = "pago";
+      await client.sendMessage(from, "¿Cómo deseas pagar?\n\n*1.* Nequi / Daviplata\n*2.* Efectivo");
+      return;
+    }
+
+    // MÉTODO DE PAGO
+    if (state === "pago") {
+      if (body === "1") {
+        data.metodoPago = "Nequi / Daviplata";
+        data.pagaCon = null;
+        data.cambio = null;
+        conversationStates[from] = "confirmacion";
+      } else if (body === "2") {
+        data.metodoPago = "Efectivo";
+        conversationStates[from] = "paga_con";
+        const { total } = getCartSummary(data.cart);
+        await client.sendMessage(from, `El total de tu pedido es ${formatPrice(total)}. ¿Con qué billete o monto pagarás para que podamos preparar tu cambio?`);
+        return;
+      } else {
+        await client.sendMessage(from, "Por favor selecciona una opción válida (1 o 2).");
+        return;
+      }
+    }
+
+    // PAGA CON (EFECTIVO)
+    if (state === "paga_con") {
+      const monto = parseInt(body.replace(/\D/g, ""));
+      const { total } = getCartSummary(data.cart);
+      if (isNaN(monto) || monto < total) {
+        await client.sendMessage(from, `Por favor, ingresa un monto válido (mayor o igual a ${formatPrice(total)}).`);
+        return;
+      }
+      data.pagaCon = monto;
+      data.cambio = monto - total;
+      conversationStates[from] = "confirmacion";
+    }
+
+    // CONFIRMACIÓN FINAL
+    if (state === "confirmacion") {
+      // Generar resumen final
+      const { lines, total } = getCartSummary(data.cart);
+      const orderCode = generateOrderCode();
+      data.orderCode = orderCode;
+      const tiempoEntrega = getDeliveryTime();
+      let resumen = `¡Tu pedido ha sido confirmado! 🎉\n\n*Orden #${orderCode}*\nCliente: ${data.nombre}\nDirección: ${data.direccion}\nDetalle:\n\n`;
+      resumen += lines.join("\n") + "\n";
+      if (data.instrucciones) resumen += `\n*Instrucciones:* "${data.instrucciones}"\n`;
+      resumen += `\n*Total a Pagar:* ${formatPrice(total)}\n*Método de Pago:* ${data.metodoPago}`;
+      if (data.metodoPago === "Efectivo" && data.pagaCon) {
+        resumen += `\nPagas con: ${formatPrice(data.pagaCon)}, cambio: ${formatPrice(data.cambio)}`;
+      }
+      resumen += `\n\nTu orden se está preparando y llegará en aproximadamente *${tiempoEntrega} minutos*.\n¡Gracias por elegir Sabor Casero!`;
       await client.sendMessage(from, resumen);
 
-      // Determinar admin según región
-      const adminIndex = regionAdminMap[region];
-      const adminNumber = adminNumbers[adminIndex];
-
-      // Mensaje para el admin: nombre, código de cliente, número, región y solicitud
-      const mensajeAdmin = `*Nueva solicitud recibida*\n\n*Nombre:* ${nombre}\n*Código de cliente:* ${codigoCliente}\n*Número:* ${numero}\n*Región:* ${
-        region ? region.charAt(0).toUpperCase() + region.slice(1) : ""
-      }\n*Solicitud:*\n\`\`\`\n${solicitud}\n\`\`\``;
-      await client.sendMessage(adminNumber, mensajeAdmin);
-
-      // Enviar tarjeta de contacto del usuario al admin
-      try {
-        const contactCard = await msg.getContact();
-        await client.sendMessage(adminNumber, contactCard, {
-          caption: `*Tarjeta de contacto del usuario*`,
-        });
-      } catch (error) {
-        console.error("Error enviando tarjeta de contacto:", error);
-        await client.sendMessage(
-          adminNumber,
-          `*Contacto del usuario:* +${numero}`
-        );
+      // Notificación al admin
+      let adminMsg = `--- NUEVO PEDIDO ENTRANTE ---\n\nOrden #${orderCode}\n\nCliente: ${data.nombre}\nDirección: ${data.direccion}\n\nDETALLE DEL PEDIDO:\n\n`;
+      adminMsg += lines.join("\n") + "\n";
+      if (data.instrucciones) adminMsg += `\nInstrucciones Especiales: "${data.instrucciones}"\n`;
+      adminMsg += `\nTOTAL: ${formatPrice(total)}\nPAGO: ${data.metodoPago}`;
+      if (data.metodoPago === "Efectivo" && data.pagaCon) {
+        adminMsg += ` (Paga con ${formatPrice(data.pagaCon)}, cambio ${formatPrice(data.cambio)})`;
       }
+      adminMsg += `\n\n--- FIN DEL PEDIDO ---`;
+      await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, adminMsg);
 
-      await client.sendMessage(
-        from,
-        "Si necesitas algo más, escribe cualquier mensaje para iniciar de nuevo."
-      );
-      await registrarConversacion(numero, messageCounters[from]);
-      delete messageCounters[from];
+      resetConversation(from);
       return;
     }
+
   } catch (error) {
-    console.error("Error general en el flujo:", error);
-    await client.sendMessage(
-      from,
-      "Ocurrió un error inesperado. Intenta de nuevo más tarde."
-    );
-    conversationStates[from] = "ended";
-    await registrarConversacion(numero, messageCounters[from]);
-    delete messageCounters[from];
+    console.error("Error en el flujo:", error);
+    await client.sendMessage(from, "Ocurrió un error inesperado. Intenta de nuevo más tarde.");
+    resetConversation(from);
   }
 });
 
@@ -673,26 +608,3 @@ client
   .initialize()
   .then(() => console.log("Client initialized successfully"))
   .catch((err) => console.error("Error initializing client", err));
-
-const readline = require("readline");
-const sessionPath = "./.wwebjs_auth/session-bot2";
-
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-rl.on("line", (input) => {
-  if (input.trim().toLowerCase() === "resetqr") {
-    console.log("Buscando sesión en:", sessionPath);
-    if (fs.existsSync(sessionPath)) {
-      console.log("Eliminando sesión y reiniciando para mostrar QR...");
-      fs.rmSync(sessionPath, { recursive: true, force: true });
-    } else {
-      console.log(
-        "No se encontró la carpeta de sesión, se mostrará el QR al reiniciar."
-      );
-    }
-    process.exit(0);
-  }
-});
