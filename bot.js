@@ -85,7 +85,7 @@ async function sendWelcomeImage(from) {
   if (fs.existsSync(logoPath)) {
     const media = MessageMedia.fromFilePath(logoPath);
     await client.sendMessage(from, media, {
-      caption: "¡Bienvenido a Sabor Casero!",
+      caption: "¡Bienvenido a El Arepazo!",
     });
   }
 }
@@ -143,9 +143,11 @@ async function saveOrderState(
   orderNumber,
   fecha,
   hora,
+  numero,
+  cliente,
+  direccion,
   items,
   estado,
-  direccion,
   metodoPago,
   precioTotal
 ) {
@@ -154,9 +156,11 @@ async function saveOrderState(
     "# ORDEN": orderNumber,
     FECHA: fecha,
     HORA: hora,
+    NUMERO: numero,
+    CLIENTE: cliente,
+    "DIRECCION DE LA ORDEN": direccion,
     "ITEMS DE LA ORDEN": items,
     "ESTADO DE ORDEN": estado,
-    "DIRECCION DE LA ORDEN": direccion,
     "METODO DE PAGO": metodoPago,
     "PRECIO TOTAL": precioTotal,
   });
@@ -198,8 +202,8 @@ client.on("message", async (msg) => {
     await sendWelcomeImage(from);
     await client.sendMessage(
       from,
-      "¡Hola! 👋 Bienvenido a *Sabor Casero*.\n¿En qué te puedo ayudar hoy?\n\n" +
-        "*1.* Ordenar 🍔\n*2.* ¿Dónde estamos ubicados? 📍\n*3.* Estado de mi pedido 🚚"
+      "¡Hola! 👋 Bienvenido a *El Arepazo* 🫓.\nEstoy aquí para ayudarte. ¿Qué te gustaría hacer hoy?\n\n" +
+        "*1.* Hacer un pedido 🫓\n*2.* Ver nuestra ubicación 📍 \n*3.* Consultar el estado de mi pedido 🚚"
     );
     return;
   }
@@ -214,6 +218,14 @@ client.on("message", async (msg) => {
         data.cart = [];
         data.step = "menu";
         conversationStates[from] = "menu";
+        // Busca historial de usuario
+        const historial = await getUserHistorial(from);
+        if (historial) {
+          data.nombre = historial.nombre;
+          data.historialExists = true;
+        } else {
+          data.historialExists = false;
+        }
         // Mostrar menú principal y Para Picar juntos con encabezados por color
 
         // --- Obtener menú principal con colores ---
@@ -223,7 +235,7 @@ client.on("message", async (msg) => {
         if (!sheetMenu || !sheetPicar) {
           await client.sendMessage(
             from,
-            "No se encontró la hoja 'MenuPrincipal' o 'Para Picar' en el menú. Por favor, contacta al administrador."
+            "⚠️ Lo sentimos, no pudimos encontrar las secciones MenuPrincipal o Para Picar en el menú. Por favor, contacta al administrador para verificar esta información. 🙏"
           );
           resetConversation(from);
           return;
@@ -263,11 +275,11 @@ client.on("message", async (msg) => {
         }));
 
         // --- Construir mensaje de menú ---
-        let menuMsg = "¡Excelente! Aquí tienes nuestro menú:\n\n";
+        let menuMsg = "¡Genial! 🎉 Aquí te comparto nuestro menú:\n\n";
         let idx = 1;
         // A LA PLANCHA
         if (plancha.length > 0) {
-          menuMsg += "*A LA PLANCHA*\n(Arepa de chocolo/maíz)\n";
+          menuMsg += "🔥 _*A LA PLANCHA*_\n(Arepa maíz, papa, ensalada)\n\n";
           plancha.forEach((item) => {
             menuMsg += `*${idx}.* ${item.name} - ${formatPrice(item.price)}\n`;
             idx++;
@@ -275,7 +287,7 @@ client.on("message", async (msg) => {
         }
         // AHUMADOS
         if (ahumados.length > 0) {
-          menuMsg += "\n*AHUMADOS*\n(Arepa de chocolo/maíz)\n";
+          menuMsg += "\n🔥 _*AHUMADOS*_\n(Arepa maíz, papa, ensalada)\n\n";
           ahumados.forEach((item) => {
             menuMsg += `*${idx}.* ${item.name} - ${formatPrice(item.price)}\n`;
             idx++;
@@ -283,7 +295,7 @@ client.on("message", async (msg) => {
         }
         // ESPECIALES DE DOMINGO (solo domingo)
         if (domingo.length > 0 && isSunday()) {
-          menuMsg += "\n*ESPECIALES DE DOMINGO*\n";
+          menuMsg += "\n🔥 _*ESPECIALES DE DOMINGO*_\n";
           domingo.forEach((item) => {
             menuMsg += `*${idx}.* ${item.name} - ${formatPrice(item.price)}\n`;
             idx++;
@@ -298,7 +310,7 @@ client.on("message", async (msg) => {
         }
         // PARA PICAR
         if (data.paraPicar.length > 0) {
-          menuMsg += "\n*PARA PICAR*\n";
+          menuMsg += "\n🍢 _*PARA PICAR*_\nLos chuzos y el chorizo (Arepa de chocolo/maíz)\n\n";
           data.paraPicar.forEach((item) => {
             menuMsg += `*${idx}.* ${item.name} - ${formatPrice(item.price)}\n`;
             idx++;
@@ -306,11 +318,7 @@ client.on("message", async (msg) => {
         }
         menuMsg += "\n*0.* Cancelar";
         // Guardar índice de corte para distinguir menú principal y para picar
-        data.menuPrincipalCount =
-          plancha.length +
-          ahumados.length +
-          (isSunday() ? domingo.length : 0) +
-          normales.length;
+        data.menuPrincipalCount = plancha.length + ahumados.length + (isSunday() ? domingo.length : 0) + normales.length;
         // Ajuste: Guarda el mensaje de menú en data.menuMsg al mostrarlo por primera vez
         data.menuMsg = menuMsg;
         await client.sendMessage(from, menuMsg);
@@ -319,25 +327,25 @@ client.on("message", async (msg) => {
         // Enviar ubicación como mapa
         await client.sendMessage(
           from,
-          "Estamos ubicados en Calle 123 #45-67, Barrio Centro, Ciudad.\n¡Te esperamos!"
+          "📍 Estamos ubicados en:\nCalle 123 #45-67, Viterbo, Caldas.\n¡Te esperamos con los brazos abiertos! 🫶"
         );
         await client.sendMessage(
           from,
-          "https://maps.google.com/?q=4.710989,-74.072090"
+          "https://www.google.com/maps/@5.0679782,-75.8666766,18z?entry=ttu&g_ep=EgoyMDI1MDYxNy4wIKXMDSoASAFQAw%3D%3D"
         );
         resetConversation(from);
         return;
       } else if (body === "3") {
         await client.sendMessage(
           from,
-          "Por favor, indícanos tu número de orden para consultar el estado."
+          "🚚 Para revisar tu pedido, solo necesito tu *número de orden*. ¡Gracias!"
         );
         conversationStates[from] = "consulta_estado";
         return;
       } else {
         await client.sendMessage(
           from,
-          "Por favor, selecciona una opción válida (1, 2 o 3)."
+          "⚠️ Por favor, selecciona una opción válida: *1*, *2* o *3*."
         );
         return;
       }
@@ -345,26 +353,34 @@ client.on("message", async (msg) => {
 
     // Consulta estado de orden
     if (state === "consulta_estado") {
-      const orderNumber = parseInt(body);
-      if (isNaN(orderNumber)) {
+      // Permite ingresar código tipo ABC-123 (no solo números)
+      const orderCode = body.toUpperCase().replace(/\s/g, "");
+      if (!/^[A-Z]{3}-\d{3}$/.test(orderCode)) {
         await client.sendMessage(
           from,
-          "Por favor, ingresa un número de orden válido."
+          "🔎 Necesito un número de orden válido para continuar.\n Usa este formato: *_ABC-123_*. ¡Gracias!"
         );
         return;
       }
-      const estado = await getOrderStatus(orderNumber);
-      if (!estado) {
+      const info = await getOrderFullInfo(orderCode);
+      if (!info) {
         await client.sendMessage(
           from,
-          "No se encontró la orden. Verifica el número e intenta de nuevo."
+          "😕 No pudimos encontrar tu orden.\n Revisa el número y vuelve a intentarlo, por favor."
         );
-      } else {
-        await client.sendMessage(
-          from,
-          `El estado de tu orden #${orderNumber} es: *${estado}*.`
-        );
-      }
+} else {
+  // Prioriza el estado y muestra toda la info relevante con formato amigable
+  let msgEstado = `📦 *Estado de tu pedido ${info["# ORDEN"]}:* ${info["ESTADO DE ORDEN"]}\n\n`;
+  msgEstado += `🗓️ *Fecha:* ${info.FECHA}\n`;
+  msgEstado += `⏰ *Hora:* ${info.HORA}\n`;
+  msgEstado += `📍 *Dirección:* ${info["DIRECCION DE LA ORDEN"]}\n`;
+  msgEstado += `💳 *Método de pago:* ${info["METODO DE PAGO"]}\n`;
+  msgEstado += `💰 *Total:* ${formatPrice(info["PRECIO TOTAL"])}\n\n`;
+  msgEstado += `📝 *Detalle del pedido:*\n${info["ITEMS DE LA ORDEN"]}`;
+
+  await client.sendMessage(from, msgEstado);
+}
+
       resetConversation(from);
       return;
     }
@@ -374,7 +390,7 @@ client.on("message", async (msg) => {
       if (body === "0") {
         await client.sendMessage(
           from,
-          "Pedido cancelado. Escribe cualquier mensaje para empezar de nuevo."
+          "🛑 El pedido fue cancelado.\nSi deseas hacer uno nuevo, solo envíanos un mensaje. ¡Aquí estamos para ti!"
         );
         resetConversation(from);
         return;
@@ -385,7 +401,7 @@ client.on("message", async (msg) => {
       if (isNaN(idx) || idx < 0 || idx >= totalOpciones) {
         await client.sendMessage(
           from,
-          "Opción inválida. Por favor selecciona un número del menú."
+          "⚠️ Opción inválida.\nPor favor, selecciona un número del menú para continuar."
         );
         return;
       }
@@ -394,7 +410,7 @@ client.on("message", async (msg) => {
         conversationStates[from] = "cantidad_menu";
         await client.sendMessage(
           from,
-          `Perfecto, ¿cuántas unidades de *${data.selectedItem.name}* deseas?`
+          `✅ Perfecto, ¿cuántas unidades de ${data.selectedItem.name} te gustaría ordenar?`
         );
       } else {
         const paraPicarIdx = idx - data.menuPrincipalCount;
@@ -402,7 +418,7 @@ client.on("message", async (msg) => {
         conversationStates[from] = "cantidad_para_picar";
         await client.sendMessage(
           from,
-          `¿Cuántas unidades de *${data.selectedParaPicar.name}* deseas?`
+          `😋 ¿Cuántas unidades de ${data.selectedParaPicar.name} te gustaría pedir?`
         );
       }
       return;
@@ -414,7 +430,7 @@ client.on("message", async (msg) => {
       if (isNaN(qty) || qty <= 0) {
         await client.sendMessage(
           from,
-          "Por favor, ingresa una cantidad válida (número mayor a 0)."
+          "⚠️ Por favor, ingresa una cantidad válida (un número mayor a 0)."
         );
         return;
       }
@@ -428,7 +444,32 @@ client.on("message", async (msg) => {
       conversationStates[from] = "agregar_menu";
       await client.sendMessage(
         from,
-        "¿Deseas ordenar otro plato de nuestro menú principal? (1. Sí / 2. No)"
+        "🍽️ ¿Te gustaría ordenar otro plato de nuestro _*menú principal*_?\n  Responde con:\n  *1.* Sí\n  *2.* No"
+      );
+      return;
+    }
+
+    // CANTIDAD PARA PICAR
+    if (state === "cantidad_para_picar") {
+      const qty = parseInt(body);
+      if (isNaN(qty) || qty <= 0) {
+        await client.sendMessage(
+          from,
+          "⚠️ Por favor, ingresa una cantidad válida (un número mayor a 0)."
+        );
+        return;
+      }
+      data.cart.push({
+        name: data.selectedParaPicar.name,
+        price: data.selectedParaPicar.price,
+        qty,
+        type: "para_picar",
+      });
+      data.selectedParaPicar = null;
+      conversationStates[from] = "agregar_menu";
+      await client.sendMessage(
+        from,
+        "🍽️ ¿Deseas ordenar otro plato de nuestro _*menú principal*_ o para _*picar*_?\nResponde con:\n *1.* Sí\n *2.* No"
       );
       return;
     }
@@ -437,7 +478,7 @@ client.on("message", async (msg) => {
     if (state === "agregar_menu") {
       if (body === "1") {
         // Volver a mostrar el menú completo igual que al inicio
-        let menuMsg = "¡Excelente! Aquí tienes nuestro menú:\n\n";
+        let menuMsg = "😄 ¡Perfecto! Este es nuestro menú, disfruta explorándolo:\n\n";
         let idx = 1;
         // A LA PLANCHA
         const plancha = data.menuPrincipal.filter(
@@ -475,13 +516,13 @@ client.on("message", async (msg) => {
         conversationStates[from] = "ofrecer_bebidas";
         await client.sendMessage(
           from,
-          "¿Te gustaría acompañar tu pedido con alguna bebida?\n1. Sí\n2. No"
+          "🥤 ¿Te gustaría acompañar tu pedido con alguna _*bebida*_?\nResponde con:\n*1.* Sí\n*2.* No"
         );
         return;
       } else {
         await client.sendMessage(
           from,
-          "Por favor responde solo con 1 (Sí) o 2 (No)."
+          "⚠️ Por favor responde solo con 1 (Sí) o 2 (No)."
         );
         return;
       }
@@ -501,24 +542,29 @@ client.on("message", async (msg) => {
           conversationStates[from] = "resumen";
           const { lines, total } = getCartSummary(data.cart);
           let resumen =
-            "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
-          resumen +=
-            lines.join("\n") +
-            `\n\nTOTAL: ${formatPrice(
-              total
-            )}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
-          await client.sendMessage(from, resumen);
-          return;
-        }
-        const rows = await sheet.getRows();
-        data.bebidas = rows.map((r) => ({
-          name: r._rawData[0],
-          price: Number(r._rawData[1]),
-        }));
-        let bebidasMsg = "Estas son nuestras bebidas:\n";
-        data.bebidas.forEach((item, i) => {
-          bebidasMsg += `*${i + 1}.* ${item.name} - ${formatPrice(
-            item.price
+            "✅ ¡Listo! ✨ Aquí tienes el resumen de tu pedido hasta ahora:\n\n";
+resumen =
+  "✅ ¡Listo! ✨ Aquí tienes el *resumen de tu pedido* hasta ahora:\n\n" +
+  lines.join("\n") +
+  `\n\n💰 *TOTAL:* ${formatPrice(total)}\n\n` +
+  "¿Qué deseas hacer?\n\n" +
+  "*1.* Modificar mi pedido ✏️\n" +
+  "*2.* Añadir instrucciones especiales 📝\n" +
+  "*3.* Confirmar y continuar ✅";
+
+await client.sendMessage(from, resumen);
+return;
+
+      }
+      const rows = await sheet.getRows();
+      data.bebidas = rows.map((r) => ({
+        name: r._rawData[0],
+        price: Number(r._rawData[1]),
+      }));
+      let bebidasMsg = "🥤 Estas son nuestras bebidas:\n";
+      data.bebidas.forEach((item, i) => {
+        bebidasMsg += `*${i + 1}.* ${item.name} - ${formatPrice(
+          item.price
           )}\n`;
         });
         bebidasMsg += "\n*0.* No añadir bebidas";
@@ -529,10 +575,10 @@ client.on("message", async (msg) => {
         conversationStates[from] = "resumen";
         const { lines, total } = getCartSummary(data.cart);
         let resumen =
-          "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
+          "✅ ¡Listo! ✨ Aquí tienes el *resumen de tu pedido* hasta ahora:\n\n";
         resumen +=
           lines.join("\n") +
-          `\n\nTOTAL: ${formatPrice(
+          `\n\n💰 *TOTAL:* ${formatPrice(
             total
           )}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
         await client.sendMessage(from, resumen);
@@ -540,7 +586,7 @@ client.on("message", async (msg) => {
       } else {
         await client.sendMessage(
           from,
-          "Por favor responde solo con 1 (Sí) o 2 (No)."
+          "⚠️ Por favor responde solo con 1 (Sí) o 2 (No)."
         );
         return;
       }
@@ -555,7 +601,7 @@ client.on("message", async (msg) => {
           "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
         resumen +=
           lines.join("\n") +
-          `\n\nTOTAL: ${formatPrice(
+          `\n\n💰 *TOTAL:* ${formatPrice(
             total
           )}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
         await client.sendMessage(from, resumen);
@@ -565,7 +611,7 @@ client.on("message", async (msg) => {
       if (isNaN(idx) || idx < 0 || idx >= data.bebidas.length) {
         await client.sendMessage(
           from,
-          "Opción inválida. Por favor selecciona una bebida válida."
+          "⚠️ Opción inválida. Por favor selecciona una bebida válida."
         );
         return;
       }
@@ -584,7 +630,7 @@ client.on("message", async (msg) => {
       if (isNaN(qty) || qty <= 0) {
         await client.sendMessage(
           from,
-          "Por favor, ingresa una cantidad válida (número mayor a 0)."
+          "⚠️ Por favor, ingresa una cantidad válida (número mayor a 0)."
         );
         return;
       }
@@ -598,7 +644,7 @@ client.on("message", async (msg) => {
       conversationStates[from] = "agregar_bebida";
       await client.sendMessage(
         from,
-        "¿Deseas añadir otra bebida? (1. Sí / 2. No)"
+        "🥤 ¿Deseas añadir otra bebida a tu pedido?\nResponde con:\n*1.* Sí\n*2.* No"
       );
       return;
     }
@@ -607,7 +653,7 @@ client.on("message", async (msg) => {
     if (state === "agregar_bebida") {
       if (body === "1") {
         // Mostrar bebidas de nuevo
-        let bebidasMsg = "Estas son nuestras bebidas:\n";
+        let bebidasMsg = "🥤 Estas son nuestras bebidas:\n";
         data.bebidas.forEach((item, i) => {
           bebidasMsg += `*${i + 1}.* ${item.name} - ${formatPrice(
             item.price
@@ -621,10 +667,10 @@ client.on("message", async (msg) => {
         conversationStates[from] = "resumen";
         const { lines, total } = getCartSummary(data.cart);
         let resumen =
-          "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
+          "✅ ¡Listo! ✨ Aquí tienes el *resumen de tu pedido* hasta ahora:\n\n";
         resumen +=
           lines.join("\n") +
-          `\n\nTOTAL: ${formatPrice(
+          `\n\n💰 *TOTAL:* ${formatPrice(
             total
           )}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
         await client.sendMessage(from, resumen);
@@ -632,7 +678,7 @@ client.on("message", async (msg) => {
       } else {
         await client.sendMessage(
           from,
-          "Por favor responde solo con 1 (Sí) o 2 (No)."
+          "⚠️ Por favor responde solo con 1 (Sí) o 2 (No)."
         );
         return;
       }
@@ -643,10 +689,10 @@ client.on("message", async (msg) => {
       if (body === "1") {
         // Modificar pedido
         if (!data.cart.length) {
-          await client.sendMessage(from, "Tu carrito está vacío.");
+          await client.sendMessage(from, "⚠️ Tu carrito está vacío.");
           return;
         }
-        let modMsg = "¿Qué ítem deseas modificar?\n";
+        let modMsg = "✏️ ¿Qué ítem del pedido deseas modificar?\n";
         data.cart.forEach((item, i) => {
           modMsg += `*${i + 1}.* ${item.qty}x ${item.name}\n`;
         });
@@ -658,124 +704,42 @@ client.on("message", async (msg) => {
         conversationStates[from] = "instrucciones";
         await client.sendMessage(
           from,
-          "Por favor, escribe tus instrucciones (ej. 'Sin azúcar', 'sin arroz', 'mucha salsa', etc.)."
+          "✍️ Cuéntanos cómo te gustaría personalizar tu pedido (por ejemplo: sin cebolla, extra queso, poco picante)."
         );
         return;
       } else if (body === "3") {
-        conversationStates[from] = "nombre";
-        await client.sendMessage(
-          from,
-          "Para finalizar, ¿a nombre de quién registramos el pedido?"
-        );
+        // Si ya existe historial, salta a dirección
+        if (data.historialExists && data.nombre) {
+          conversationStates[from] = "direccion";
+          await client.sendMessage(
+            from,
+            `🏡 ¡Perfecto, *${data.nombre}*!\n  Ahora, por favor indícame la dirección completa para la entrega. 📍`
+          );
+        } else {
+          conversationStates[from] = "nombre";
+          await client.sendMessage(
+            from,
+            "🧾 Para finalizar, ¿a nombre de quién registramos el pedido?"
+          );
+        }
         return;
       } else {
         await client.sendMessage(
           from,
-          "Por favor selecciona una opción válida (1, 2 o 3)."
+          "⚠️ Por favor selecciona una opción válida (1, 2 o 3)."
         );
         return;
       }
-    }
-
-    // MODIFICAR PEDIDO
-    if (state === "modificar") {
-      if (body === "0") {
-        conversationStates[from] = "resumen";
-        const { lines, total } = getCartSummary(data.cart);
-        let resumen =
-          "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
-        resumen +=
-          lines.join("\n") +
-          `\n\nTOTAL: ${formatPrice(
-            total
-          )}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
-        await client.sendMessage(from, resumen);
-        return;
-      }
-      const idx = parseInt(body) - 1;
-      if (isNaN(idx) || idx < 0 || idx >= data.cart.length) {
-        await client.sendMessage(
-          from,
-          "Opción inválida. Por favor selecciona un ítem válido."
-        );
-        return;
-      }
-      data.modificarIdx = idx;
-      conversationStates[from] = "modificar_opcion";
-      await client.sendMessage(
-        from,
-        `¿Qué deseas hacer con *${data.cart[idx].name}*?\n\na) Cambiar cantidad\nb) Eliminar del pedido`
-      );
-      return;
-    }
-
-    // OPCIÓN DE MODIFICACIÓN
-    if (state === "modificar_opcion") {
-      if (/^a$/i.test(body)) {
-        conversationStates[from] = "modificar_cantidad";
-        await client.sendMessage(
-          from,
-          `¿Cuál es la nueva cantidad para *${
-            data.cart[data.modificarIdx].name
-          }*?`
-        );
-        return;
-      } else if (/^b$/i.test(body)) {
-        data.cart.splice(data.modificarIdx, 1);
-        data.modificarIdx = null;
-        conversationStates[from] = "resumen";
-        const { lines, total } = getCartSummary(data.cart);
-        let resumen =
-          "¡Listo! ✨ Aquí está el resumen de tu pedido actualizado:\n\n";
-        resumen +=
-          lines.join("\n") +
-          `\n\nTOTAL: ${formatPrice(
-            total
-          )}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
-        await client.sendMessage(from, resumen);
-        return;
-      } else {
-        await client.sendMessage(
-          from,
-          "Por favor responde 'a' para cambiar cantidad o 'b' para eliminar."
-        );
-        return;
-      }
-    }
-
-    // CAMBIAR CANTIDAD DE ÍTEM
-    if (state === "modificar_cantidad") {
-      const qty = parseInt(body);
-      if (isNaN(qty) || qty <= 0) {
-        await client.sendMessage(
-          from,
-          "Por favor, ingresa una cantidad válida (número mayor a 0)."
-        );
-        return;
-      }
-      data.cart[data.modificarIdx].qty = qty;
-      data.modificarIdx = null;
-      conversationStates[from] = "resumen";
-      const { lines, total } = getCartSummary(data.cart);
-      let resumen =
-        "¡Listo! ✨ Aquí está el resumen de tu pedido actualizado:\n\n";
-      resumen +=
-        lines.join("\n") +
-        `\n\nTOTAL: ${formatPrice(
-          total
-        )}\n\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅`;
-      await client.sendMessage(from, resumen);
-      return;
     }
 
     // INSTRUCCIONES ESPECIALES
     if (state === "instrucciones") {
-      data.instrucciones = body;
+      data.instrucciones = body || ""; // Asegura que siempre sea string
       conversationStates[from] = "resumen";
       const { lines, total } = getCartSummary(data.cart);
       let resumen =
-        "¡Listo! ✨ Aquí está el resumen de tu pedido hasta ahora:\n\n";
-      resumen += lines.join("\n") + `\n\nTOTAL: ${formatPrice(total)}\n`;
+        "✅ ¡Listo! ✨ Aquí tienes el *resumen de tu pedido* hasta ahora:\n\n";
+      resumen += lines.join("\n") + `\n\n💰 *TOTAL:* ${formatPrice(total)}\n`;
       resumen += `\n*Instrucciones especiales:* "${data.instrucciones}"\n`;
       resumen +=
         "\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅";
@@ -783,168 +747,465 @@ client.on("message", async (msg) => {
       return;
     }
 
-    // NOMBRE DEL CLIENTE
+    // MODIFICAR PEDIDO (corregido para evitar que el bot se caiga)
+    if (state === "modificar") {
+      const idx = parseInt(body) - 1;
+      if (body === "0") {
+        conversationStates[from] = "resumen";
+        const { lines, total } = getCartSummary(data.cart);
+        let resumen =
+          "✅ ¡Listo! ✨ Aquí tienes el *resumen de tu pedido* hasta ahora:\n\n";
+        resumen += lines.join("\n") + `\n\n💰 *TOTAL:* ${formatPrice(total)}\n`;
+        if (data.instrucciones)
+          resumen += `\n*Instrucciones especiales:* "${data.instrucciones}"\n`;
+        resumen +=
+          "\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅";
+        await client.sendMessage(from, resumen);
+        return;
+      }
+      if (
+        isNaN(idx) ||
+        idx < 0 ||
+        idx >= data.cart.length
+      ) {
+        await client.sendMessage(
+          from,
+          "⚠️ Opción inválida. Por favor selecciona el número de un ítem del pedido o 0 para cancelar."
+        );
+        return;
+      }
+      // Preguntar qué hacer con el ítem seleccionado
+      data.modificarIdx = idx;
+      conversationStates[from] = "modificar_accion";
+      await client.sendMessage(
+        from,
+        `🔧 Para ${data.cart[idx].qty}x ${data.cart[idx].name}, elige una opción:
+*1.* Cambiar cantidad
+*2.* Quitar del pedido
+*0.* Cancelar`
+      );
+      return;
+    }
+
+    // ACCIÓN SOBRE ÍTEM A MODIFICAR
+    if (state === "modificar_accion") {
+      const idx = data.modificarIdx;
+      if (
+        typeof idx !== "number" ||
+        idx < 0 ||
+        !data.cart ||
+        idx >= data.cart.length
+      ) {
+        // Si por alguna razón el índice no es válido, vuelve al resumen
+        conversationStates[from] = "resumen";
+        await client.sendMessage(
+          from,
+          "Ocurrió un error al modificar el pedido. Volviendo al resumen."
+        );
+        return;
+      }
+      if (body === "0") {
+        conversationStates[from] = "resumen";
+        await client.sendMessage(from, "❌ Modificación cancelada.\nVolviendo al resumen del pedido... 🧾");
+        return;
+      }
+      if (body === "1") {
+        conversationStates[from] = "modificar_cantidad";
+        await client.sendMessage(
+          from,
+          `¿Cuál es la nueva cantidad para *${data.cart[idx].name}*?`
+        );
+        return;
+      }
+      if (body === "2") {
+        // Eliminar el ítem
+        data.cart.splice(idx, 1);
+        delete data.modificarIdx;
+        conversationStates[from] = "resumen";
+        const { lines, total } = getCartSummary(data.cart);
+        let resumen =
+          "✅ ¡Listo! ✨ Aquí tienes el *resumen de tu pedido* hasta ahora:\n\n";
+        resumen += lines.join("\n") + `\n\n💰 *TOTAL:* ${formatPrice(total)}\n`;
+        if (data.instrucciones)
+          resumen += `\n*Instrucciones especiales:* "${data.instrucciones}"\n`;
+        resumen +=
+          "\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅";
+        await client.sendMessage(from, resumen);
+        return;
+      }
+      await client.sendMessage(
+        from,
+        "⚠️ Por favor selecciona una opción válida: 1 (cambiar cantidad), 2 (eliminar), o 0 (cancelar)."
+      );
+      return;
+    }
+
+    // CAMBIAR CANTIDAD DE ÍTEM
+    if (state === "modificar_cantidad") {
+      const idx = data.modificarIdx;
+      if (
+        typeof idx !== "number" ||
+        idx < 0 ||
+        !data.cart ||
+        idx >= data.cart.length
+      ) {
+        conversationStates[from] = "resumen";
+        await client.sendMessage(
+          from,
+          "Ocurrió un error al modificar la cantidad. Volviendo al resumen."
+        );
+        return;
+      }
+      const qty = parseInt(body);
+      if (isNaN(qty) || qty <= 0) {
+        await client.sendMessage(
+          from,
+          "⚠️ Por favor, ingresa una cantidad válida (número mayor a 0)."
+        );
+        return;
+      }
+      data.cart[idx].qty = qty;
+      delete data.modificarIdx;
+      conversationStates[from] = "resumen";
+      const { lines, total } = getCartSummary(data.cart);
+      let resumen =
+        "✅ ¡Listo! ✨ Aquí tienes el *resumen de tu pedido* hasta ahora:\n\n";
+      resumen += lines.join("\n") + `\n\n💰 *TOTAL:* ${formatPrice(total)}\n`;
+      if (data.instrucciones)
+        resumen += `\n*Instrucciones especiales:* "${data.instrucciones}"\n`;
+      resumen +=
+        "\n¿Qué deseas hacer?\n\n*1.* Modificar mi pedido ✏️\n*2.* Añadir instrucciones especiales 📝\n*3.* Confirmar y continuar ✅";
+      await client.sendMessage(from, resumen);
+      return;
+    }
+
+    // === NUEVO: MANEJO DE ESTADO "nombre" ===
     if (state === "nombre") {
       data.nombre = body;
       conversationStates[from] = "direccion";
       await client.sendMessage(
         from,
-        `¡Gracias, ${data.nombre}! Ahora, por favor, indícame la dirección completa para la entrega.`
+        `🏡 ¡Perfecto, ${data.nombre}! \n
+Ahora, por favor indícame la dirección completa para la entrega. 📍`
       );
       return;
     }
 
-    // DIRECCIÓN DE ENTREGA
+    // === NUEVO: MANEJO DE ESTADO "direccion" ===
     if (state === "direccion") {
       data.direccion = body;
-      conversationStates[from] = "pago";
+      conversationStates[from] = "metodo_pago";
       await client.sendMessage(
         from,
-        "¿Cómo deseas pagar?\n\n*1.* Nequi / Daviplata\n*2.* Efectivo"
+        "💳 ¿Cómo deseas pagar tu pedido?\n*1.* Efectivo 💵\n*2.* Nequi 📲\n*3.* Daviplata 📲"
       );
       return;
     }
 
-    // MÉTODO DE PAGO
-    if (state === "pago") {
-      if (body === "1") {
-        data.metodoPago = "Nequi / Daviplata";
-        data.pagaCon = null;
-        data.cambio = null;
-        conversationStates[from] = "confirmacion";
-        // Ejecutar confirmación inmediatamente
-        // Generar resumen final
-        const { lines, total } = getCartSummary(data.cart);
-        const orderCode = await generateOrderCode();
-        data.orderCode = orderCode;
-        const tiempoEntrega = getDeliveryTime();
-        let resumen = `¡Tu pedido ha sido confirmado! 🎉\n\n*Orden ${orderCode}*\nCliente: ${data.nombre}\nDirección: ${data.direccion}\nDetalle:\n\n`;
-        resumen += lines.join("\n") + "\n";
-        if (data.instrucciones)
-          resumen += `\n*Instrucciones:* \"${data.instrucciones}\"\n`;
-        resumen += `\n*Total a Pagar:* ${formatPrice(
-          total
-        )}\n*Método de Pago:* ${data.metodoPago}`;
-        resumen += `\n\nTu orden se está preparando y llegará en aproximadamente *${tiempoEntrega} minutos*.\n¡Gracias por elegir Sabor Casero!`;
-        await client.sendMessage(from, resumen);
-        // Notificación al admin
-        let adminMsg = `--- NUEVO PEDIDO ENTRANTE ---\n\nOrden ${orderCode}\n\nCliente: ${data.nombre}\nDirección: ${data.direccion}\n\nDETALLE DEL PEDIDO:\n\n`;
-        adminMsg += lines.join("\n") + "\n";
-        if (data.instrucciones)
-          adminMsg += `\nInstrucciones Especiales: \"${data.instrucciones}\"\n`;
-        adminMsg += `\nTOTAL: ${formatPrice(total)}\nPAGO: ${data.metodoPago}`;
-        adminMsg += `\n\n--- FIN DEL PEDIDO ---`;
-        await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, adminMsg);
-        // Guardar en ORDEN_STATE con todos los datos
-        const { fecha, hora } = getColombiaDateAndTime();
-        const items =
-          lines.join("\n") +
-          (data.instrucciones ? `\nInstrucciones: ${data.instrucciones}` : "");
-        await saveOrderState(
-          orderCode,
-          fecha,
-          hora,
-          items,
-          "en preparación",
-          data.direccion,
-          data.metodoPago,
-          total
-        );
-        resetConversation(from);
-        return;
-      } else if (body === "2") {
-        data.metodoPago = "Efectivo";
-        conversationStates[from] = "paga_con";
-        const { total } = getCartSummary(data.cart);
+    // === NUEVO: MANEJO DE ESTADO "metodo_pago" ===
+    if (state === "metodo_pago") {
+      let metodo = "";
+      if (body === "1") metodo = "Efectivo";
+      else if (body === "2") metodo = "Nequi";
+      else if (body === "3") metodo = "Daviplata";
+      else {
         await client.sendMessage(
           from,
-          `El total de tu pedido es ${formatPrice(
-            total
-          )}. ¿Con qué billete o monto pagarás para que podamos preparar tu cambio?`
-        );
-        return;
-      } else {
-        await client.sendMessage(
-          from,
-          "Por favor selecciona una opción válida (1 o 2)."
+          "⚠️ Por favor selecciona una opción válida:\n*1.* Efectivo\n*2.* Nequi\n*3.* Daviplata"
         );
         return;
       }
+      data.metodoPago = metodo;
+      if (metodo === "Efectivo") {
+        conversationStates[from] = "paga_con";
+        await client.sendMessage(
+          from,
+          "💵 ¿Con cuánto vas a pagar?\n(Ejemplo: 50000)"
+        );
+} else {
+  data.pagaCon = null;
+  data.cambio = null;
+  conversationStates[from] = "confirmacion";
+
+  // --- INICIO BLOQUE CONFIRMACIÓN FINAL ---
+  const { lines, total } = getCartSummary(data.cart);
+  let orderCode = data.orderCode;
+  if (!orderCode) {
+    orderCode = await generateUniqueOrderCode();
+    data.orderCode = orderCode;
+  }
+  const tiempoEntrega = getDeliveryTime();
+  let resumen = `🎉 *¡Tu pedido ha sido confirmado!* 🎉\n\n` +
+                `📦 *Orden:* ${orderCode}\n` +
+                `🙋‍♂️ *Cliente:* ${data.nombre}\n` +
+                `📍 *Dirección:* ${data.direccion}\n\n` +
+                `🧾 *Detalle del pedido:*\n` +
+                lines.join("\n") + "\n";
+
+  if (data.instrucciones)
+    resumen += `\n📝 *Instrucciones:* "${data.instrucciones}"\n`;
+
+  resumen += `\n💰 *Total a pagar:* ${formatPrice(total)}\n` +
+             `💳 *Método de pago:* ${data.metodoPago}`;
+
+  if (data.metodoPago === "Efectivo" && data.pagaCon) {
+    resumen += `\n💵 Pagas con: ${formatPrice(data.pagaCon)}\n` +
+               `🔁 Cambio: ${formatPrice(data.cambio)}`;
+  }
+
+  resumen += `\n\n⏱️ Tu orden se está preparando y llegará en aproximadamente *${tiempoEntrega} minutos*.\n` +
+             `¡Gracias por elegir *El Arepazo*! 🧡`;
+
+  await client.sendMessage(from, resumen);
+
+  try {
+    const stickerPath = path.join(__dirname, "sticker.webp");
+    if (fs.existsSync(stickerPath)) {
+      const stickerMedia = MessageMedia.fromFilePath(stickerPath);
+      await client.sendMessage(from, stickerMedia, { sendMediaAsSticker: true });
+    }
+  } catch (e) {
+    console.error("No se pudo enviar el sticker:", e);
+  }
+
+  // Notificación al administrador
+  let adminMsg = `🚨 *NUEVO PEDIDO ENTRANTE* 🚨\n\n` +
+                 `📦 *Orden:* ${orderCode}\n` +
+                 `🙋‍♂️ *Cliente:* ${data.nombre}\n` +
+                 `📍 *Dirección:* ${data.direccion}\n\n` +
+                 `🧾 *Detalle del pedido:*\n` +
+                 lines.join("\n") + "\n";
+
+  if (data.instrucciones)
+    adminMsg += `\n📝 *Instrucciones especiales:* "${data.instrucciones}"\n`;
+
+  adminMsg += `\n💰 *TOTAL:* ${formatPrice(total)}\n` +
+              `💳 *PAGO:* ${data.metodoPago}\n\n` +
+              `✅ *Fin del pedido*`;
+
+  await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, adminMsg);
+
+  // Guardar pedido
+  const { fecha, hora } = getColombiaDateAndTime();
+  const items = lines.join("\n") +
+                (data.instrucciones ? `\nInstrucciones: ${data.instrucciones}` : "");
+
+  await saveOrderState(
+    orderCode,
+    fecha,
+    hora,
+    from,
+    data.nombre,
+    data.direccion,
+    items,
+    "en preparación",
+    data.metodoPago,
+    total
+  );
+
+  await updateUserHistorial(from, data.nombre);
+  resetConversation(from);
+  // --- FIN BLOQUE CONFIRMACIÓN FINAL ---
+}
+
+      return;
     }
 
-    // PAGA CON (EFECTIVO)
-    if (state === "paga_con") {
-      const monto = parseInt(body.replace(/\D/g, ""));
-      const { total } = getCartSummary(data.cart);
-      if (isNaN(monto) || monto < total) {
-        await client.sendMessage(
-          from,
-          `Por favor, ingresa un monto válido (mayor o igual a ${formatPrice(
-            total
-          )}).`
-        );
-        return;
-      }
-      data.pagaCon = monto;
-      data.cambio = monto - total;
-      conversationStates[from] = "confirmacion";
+    // === NUEVO: MANEJO DE ESTADO "paga_con" ===
+if (state === "paga_con") {
+  const { total } = getCartSummary(data.cart);
+  const pagaCon = parseInt(body.replace(/\D/g, ""));
+  
+  if (isNaN(pagaCon) || pagaCon < total) {
+    await client.sendMessage(
+      from,
+      `⚠️ Por favor, ingresa un valor válido mayor o igual al total de tu pedido (${formatPrice(total)}).`
+    );
+    return;
+  }
+
+  data.pagaCon = pagaCon;
+  data.cambio = pagaCon - total;
+  conversationStates[from] = "confirmacion";
+
+  // --- INICIO BLOQUE CONFIRMACIÓN FINAL ---
+  const { lines, total: totalPedido } = getCartSummary(data.cart);
+  let orderCode = data.orderCode;
+  if (!orderCode) {
+    orderCode = await generateUniqueOrderCode();
+    data.orderCode = orderCode;
+  }
+
+  const tiempoEntrega = getDeliveryTime();
+
+  let resumen = `🎉 *¡Tu pedido ha sido confirmado!* 🎉\n\n` +
+                `📦 *Orden:* ${orderCode}\n` +
+                `🙋‍♂️ *Cliente:* ${data.nombre}\n` +
+                `📍 *Dirección:* ${data.direccion}\n\n` +
+                `🧾 *Detalle del pedido:*\n` +
+                lines.join("\n") + "\n";
+
+  if (data.instrucciones)
+    resumen += `\n📝 *Instrucciones:* "${data.instrucciones}"\n`;
+
+  resumen += `\n💰 *Total a pagar:* ${formatPrice(totalPedido)}\n` +
+             `💳 *Método de pago:* ${data.metodoPago}`;
+
+  if (data.metodoPago === "Efectivo" && data.pagaCon) {
+    resumen += `\n💵 Pagas con: ${formatPrice(data.pagaCon)}\n` +
+               `🔁 Cambio: ${formatPrice(data.cambio)}`;
+  }
+
+  resumen += `\n\n⏱️ Tu orden se está preparando y llegará en aproximadamente *${tiempoEntrega} minutos*.\n` +
+             `¡Gracias por elegir *El Arepazo*! 🧡`;
+
+  await client.sendMessage(from, resumen);
+
+  // Envío de sticker
+  try {
+    const stickerPath = path.join(__dirname, "sticker.webp");
+    if (fs.existsSync(stickerPath)) {
+      const stickerMedia = MessageMedia.fromFilePath(stickerPath);
+      await client.sendMessage(from, stickerMedia, { sendMediaAsSticker: true });
     }
+  } catch (e) {
+    console.error("No se pudo enviar el sticker:", e);
+  }
+
+  // Notificación al administrador
+  let adminMsg = `🚨 *NUEVO PEDIDO ENTRANTE* 🚨\n\n` +
+                 `📦 *Orden:* ${orderCode}\n` +
+                 `🙋‍♂️ *Cliente:* ${data.nombre}\n` +
+                 `📍 *Dirección:* ${data.direccion}\n\n` +
+                 `🧾 *Detalle del pedido:*\n` +
+                 lines.join("\n") + "\n";
+
+  if (data.instrucciones)
+    adminMsg += `\n📝 *Instrucciones especiales:* "${data.instrucciones}"\n`;
+
+  adminMsg += `\n💰 *TOTAL:* ${formatPrice(totalPedido)}\n` +
+              `💳 *PAGO:* ${data.metodoPago}\n\n` +
+              `✅ *Fin del pedido*`;
+
+  await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, adminMsg);
+
+  // Guardar el pedido
+  const { fecha, hora } = getColombiaDateAndTime();
+  const items = lines.join("\n") +
+                (data.instrucciones ? `\nInstrucciones: ${data.instrucciones}` : "");
+
+  await saveOrderState(
+    orderCode,
+    fecha,
+    hora,
+    from,
+    data.nombre,
+    data.direccion,
+    items,
+    "en preparación",
+    data.metodoPago,
+    totalPedido
+  );
+
+  await updateUserHistorial(from, data.nombre);
+  resetConversation(from);
+  // --- FIN BLOQUE CONFIRMACIÓN FINAL ---
+  return;
+}
+
 
     // CONFIRMACIÓN FINAL
-    if (state === "confirmacion") {
-      // Generar resumen final
-      const { lines, total } = getCartSummary(data.cart);
-      // Si ya existe un orderCode, úsalo, si no, genera uno único
-      let orderCode = data.orderCode;
-      if (!orderCode) {
-        orderCode = generateOrderCode();
-        data.orderCode = orderCode;
-      }
-      const tiempoEntrega = getDeliveryTime();
-      let resumen = `¡Tu pedido ha sido confirmado! 🎉\n\n*Orden ${orderCode}*\nCliente: ${data.nombre}\nDirección: ${data.direccion}\nDetalle:\n\n`;
-      resumen += lines.join("\n") + "\n";
-      if (data.instrucciones)
-        resumen += `\n*Instrucciones:* \"${data.instrucciones}\"\n`;
-      resumen += `\n*Total a Pagar:* ${formatPrice(total)}\n*Método de Pago:* ${
-        data.metodoPago
-      }`;
-      if (data.metodoPago === "Efectivo" && data.pagaCon) {
-        resumen += `\nPagas con: ${formatPrice(
-          data.pagaCon
-        )}, cambio: ${formatPrice(data.cambio)}`;
-      }
-      resumen += `\n\nTu orden se está preparando y llegará en aproximadamente *${tiempoEntrega} minutos*.\n¡Gracias por elegir Sabor Casero!`;
-      await client.sendMessage(from, resumen);
-      // Notificación al admin
-      let adminMsg = `--- NUEVO PEDIDO ENTRANTE ---\n\nOrden ${orderCode}\n\nCliente: ${data.nombre}\nDirección: ${data.direccion}\n\nDETALLE DEL PEDIDO:\n\n`;
-      adminMsg += lines.join("\n") + "\n";
-      if (data.instrucciones)
-        adminMsg += `\nInstrucciones Especiales: \"${data.instrucciones}\"\n`;
-      adminMsg += `\nTOTAL: ${formatPrice(total)}\nPAGO: ${data.metodoPago}`;
-      if (data.metodoPago === "Efectivo" && data.pagaCon) {
-        adminMsg += ` (Paga con ${formatPrice(
-          data.pagaCon
-        )}, cambio ${formatPrice(data.cambio)})`;
-      }
-      adminMsg += `\n\n--- FIN DEL PEDIDO ---`;
-      await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, adminMsg);
-      // Guardar en ORDEN_STATE con todos los datos
-      const { fecha, hora } = getColombiaDateAndTime();
-      const items =
-        lines.join("\n") +
-        (data.instrucciones ? `\nInstrucciones: ${data.instrucciones}` : "");
-      await saveOrderState(
-        orderCode,
-        fecha,
-        hora,
-        items,
-        "en preparación",
-        data.direccion,
-        data.metodoPago,
-        total
+if (state === "confirmacion") {
+  // Generar resumen final
+  const { lines, total } = getCartSummary(data.cart);
+  let orderCode = data.orderCode;
+  if (!orderCode) {
+    orderCode = await generateUniqueOrderCode();
+    data.orderCode = orderCode;
+  }
+
+  const tiempoEntrega = getDeliveryTime();
+
+  let resumen = `🎉 *¡Tu pedido ha sido confirmado!* 🎉\n\n` +
+                `📦 *Orden:* ${orderCode}\n` +
+                `🙋‍♂️ *Cliente:* ${data.nombre}\n` +
+                `📍 *Dirección:* ${data.direccion}\n\n` +
+                `🧾 *Detalle del pedido:*\n` +
+                lines.join("\n") + "\n";
+
+  if (data.instrucciones)
+    resumen += `\n📝 *Instrucciones:* "${data.instrucciones}"\n`;
+
+  resumen += `\n💰 *Total a pagar:* ${formatPrice(total)}\n` +
+             `💳 *Método de pago:* ${data.metodoPago}`;
+
+  if (data.metodoPago === "Efectivo" && data.pagaCon) {
+    resumen += `\n💵 Pagas con: ${formatPrice(data.pagaCon)}\n` +
+               `🔁 Cambio: ${formatPrice(data.cambio)}`;
+  }
+
+  resumen += `\n\n⏱️ Tu orden se está preparando y llegará en aproximadamente *${tiempoEntrega} minutos*.\n` +
+             `¡Gracias por elegir *El Arepazo*! 🧡`;
+
+  await client.sendMessage(from, resumen);
+
+  // Enviar sticker de confirmación
+  try {
+    const stickerPath = path.join(__dirname, "sticker.webp");
+    if (fs.existsSync(stickerPath)) {
+      const stickerMedia = MessageMedia.fromFilePath(stickerPath);
+      await client.sendMessage(from, stickerMedia, { sendMediaAsSticker: true });
+    }
+  } catch (e) {
+    console.error("No se pudo enviar el sticker:", e);
+  }
+
+  // Notificación al administrador
+  let adminMsg = `🚨 *NUEVO PEDIDO ENTRANTE* 🚨\n\n` +
+                 `📦 *Orden:* ${orderCode}\n` +
+                 `🙋‍♂️ *Cliente:* ${data.nombre}\n` +
+                 `📍 *Dirección:* ${data.direccion}\n\n` +
+                 `🧾 *Detalle del pedido:*\n` +
+                 lines.join("\n") + "\n";
+
+  if (data.instrucciones)
+    adminMsg += `\n📝 *Instrucciones especiales:* "${data.instrucciones}"\n`;
+
+  adminMsg += `\n💰 *TOTAL:* ${formatPrice(total)}\n` +
+              `💳 *PAGO:* ${data.metodoPago}\n\n` +
+              `✅ *Fin del pedido*`;
+
+  await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, adminMsg);
+
+  // Guardar en ORDEN_STATE
+  const { fecha, hora } = getColombiaDateAndTime();
+  const items = lines.join("\n") +
+                (data.instrucciones ? `\nInstrucciones: ${data.instrucciones}` : "");
+
+  await saveOrderState(
+    orderCode,
+    fecha,
+    hora,
+    from,
+    data.nombre,
+    data.direccion,
+    items,
+    "en preparación",
+    data.metodoPago,
+    total
+  );
+
+  // Actualiza historial de usuario
+  await updateUserHistorial(from, data.nombre);
+  resetConversation(from);
+  return;
+}
+else {
+      await client.sendMessage(
+        from,
+        "Ocurrió un error inesperado o no se encontró la hoja 'ORDENES'. Intenta de nuevo más tarde o contacta al administrador."
       );
       resetConversation(from);
-      return;
     }
   } catch (error) {
     console.error("Error en el flujo:", error);
@@ -985,22 +1246,113 @@ async function getMenuItemsWithColor() {
 }
 
 // --- Imprimir en consola si los ítems tienen color ---
-(async () => {
-  try {
-    const items = await getMenuItemsWithColor();
-    items.forEach((item) => {
-      if (
-        item.color &&
-        (item.color.red !== undefined ||
-          item.color.green !== undefined ||
-          item.color.blue !== undefined)
-      ) {
-        console.log(`El ítem "${item.name}" tiene color:`, item.color);
-      } else {
-        console.log(`El ítem "${item.name}" NO tiene color`);
-      }
-    });
-  } catch (e) {
-    console.error("Error comprobando colores en MenuPrincipal:", e.message);
+// (async () => {
+//   try {
+//     const items = await getMenuItemsWithColor();
+//     items.forEach((item) => {
+//       if (
+//         item.color &&
+//         (item.color.red !== undefined ||
+//           item.color.green !== undefined ||
+//           item.color.blue !== undefined)
+//       ) {
+//         console.log(`El ítem "${item.name}" tiene color:`, item.color);
+//       } else {
+//         console.log(`El ítem "${item.name}" NO tiene color`);
+//       }
+//     });
+//   } catch (e) {
+//     console.error("Error comprobando colores en MenuPrincipal:", e.message);
+//   }
+// })();
+
+// Genera un código único tipo ABC-123 y valida que no exista en ORDEN_STATE
+async function generateUniqueOrderCode() {
+  const { sheet } = await getOrderSheet();
+  const rows = await sheet.getRows();
+  let code, exists;
+  do {
+    const letters = "ABCDEFGHJKLMNPRSTUVWXYZ";
+    const numbers = "0123456789";
+    code =
+      Array.from({ length: 3 }, () => letters[Math.floor(Math.random() * letters.length)]).join("") +
+      "-" +
+      Array.from({ length: 3 }, () => numbers[Math.floor(Math.random() * numbers.length)]).join("");
+    exists = rows.some((r) => (r._rawData[0] || "").toUpperCase() === code);
+  } while (exists);
+  return code;
+}
+
+async function getHistorialSheet() {
+  // Usa la variable de entorno HISTORIAL_USERS para el ID del archivo de historial
+  const serviceAccountAuth = getServiceAccountAuth();
+  const doc = new GoogleSpreadsheet(process.env.HISTORIAL_USERS, serviceAccountAuth);
+  await doc.loadInfo();
+  // Buscar hoja ignorando mayúsculas/minúsculas y espacios
+  let sheet = null;
+  for (const title of Object.keys(doc.sheetsByTitle)) {
+    if (title.replace(/\s/g, '').toUpperCase() === "HISTORIAL_USERS") {
+      sheet = doc.sheetsByTitle[title];
+      break;
+    }
   }
-})();
+  if (!sheet)
+    throw new Error("No se encontró la hoja 'HISTORIAL_USERS' en el archivo de Google Sheets.");
+  return sheet;
+}
+
+// Busca usuario en historial, retorna {nombre, veces} o null
+async function getUserHistorial(numero) {
+  const sheet = await getHistorialSheet();
+  const rows = await sheet.getRows();
+  const row = rows.find(r => (r._rawData[0] || "") === numero);
+  if (!row) return null;
+  return {
+    nombre: row._rawData[1],
+    veces: parseInt(row._rawData[2]) || 0,
+    row
+  };
+}
+
+// Actualiza o crea historial de usuario
+async function updateUserHistorial(numero, nombre) {
+  const sheet = await getHistorialSheet();
+  const rows = await sheet.getRows();
+  let row = rows.find(r => (r._rawData[0] || "") === numero);
+  if (row) {
+    row._rawData[2] = (parseInt(row._rawData[2]) || 0) + 1;
+    row["VECES QUE HA ESCRITO"] = row._rawData[2];
+    // Si el nombre cambió, actualízalo
+    if (nombre && row._rawData[1] !== nombre) {
+      row._rawData[1] = nombre;
+      row["NOMBRE DE USUARIO"] = nombre;
+    }
+    await row.save();
+  } else {
+    await sheet.addRow({
+      "NUMERO": numero,
+      "NOMBRE DE USUARIO": nombre,
+      "VECES QUE HA ESCRITO": 1
+    });
+  }
+}
+
+// Consulta toda la info de la orden por código (ajustado a nuevas columnas)
+async function getOrderFullInfo(orderCode) {
+  const { sheet } = await getOrderSheet();
+  const rows = await sheet.getRows();
+  const row = rows.find((r) => ((r._rawData[0] || "").toUpperCase().replace(/\s/g, "")) === orderCode.toUpperCase().replace(/\s/g, ""));
+  if (!row) return null;
+  return {
+    "# ORDEN": row._rawData[0],
+    FECHA: row._rawData[1],
+    HORA: row._rawData[2],
+    NUMERO: row._rawData[3],
+    CLIENTE: row._rawData[4],
+    "DIRECCION DE LA ORDEN": row._rawData[5],
+    "ITEMS DE LA ORDEN": row._rawData[6],
+    "ESTADO DE ORDEN": row._rawData[7],
+    "METODO DE PAGO": row._rawData[8],
+    "PRECIO TOTAL": row._rawData[9],
+  };
+}
