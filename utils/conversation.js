@@ -25,6 +25,15 @@ function setConversationState(from, state) {
  * @returns {object} - Los datos del usuario.
  */
 function getUserData(from) {
+    // Si no existen datos para el usuario, se inicializan
+    if (!userData[from]) {
+        userData[from] = {
+            cart: [],
+            step: "inicio",
+            nequiAttempts: 0,
+            denialCount: 0
+        };
+    }
     return userData[from];
 }
 
@@ -34,7 +43,13 @@ function getUserData(from) {
  */
 function resetConversation(from) {
     conversationStates[from] = null;
-    userData[from] = { cart: [], step: "inicio" }; // Se reinicia con un objeto base
+    // Se reinicia con un objeto base
+    userData[from] = {
+        cart: [],
+        step: "inicio",
+        nequiAttempts: 0,
+        denialCount: 0
+    };
 }
 
 module.exports = {

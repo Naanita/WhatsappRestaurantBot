@@ -8,6 +8,7 @@ const conv = require("../utils/conversation");
 const menuService = require("../services/menuService");
 const orderService = require("../services/orderService");
 const historyService = require("../services/historyService");
+const adminService = require("../services/adminService"); // Importamos el nuevo servicio
 const path = require("path");
 const fs = require("fs");
 const { MessageMedia } = require("whatsapp-web.js");
@@ -351,13 +352,115 @@ async function handleMetodoPago(from, body, client) {
         return;
     }
     data.metodoPago = metodo;
-    if (metodo === "Efectivo") {
+
+    if (metodo === "Nequi") {
+        conv.setConversationState(from, "nequi_pago");
+        // --- MENSAJE CORREGIDO ---
+        await client.sendMessage(from, `Has elegido Nequi. Por favor, realiza el pago a nuestra línea *${process.env.PAY_NUMBER}*.\n\nUna vez hecho, por favor *escribe el número de teléfono (10 dígitos) desde el que realizaste el pago* para poder asociarlo a tu pedido.`);
+    } else if (metodo === "Efectivo") {
         conv.setConversationState(from, "paga_con");
         await client.sendMessage(from, "💵 ¿Con cuánto vas a pagar? (Ej: 50000)");
     } else {
         data.pagaCon = null;
         data.cambio = null;
         await handleConfirmacion(from, client);
+    }
+}
+async function handleNequiPago(from, body, client) {
+    const data = conv.getUserData(from);
+    const nequiAttempts = (data.nequiAttempts || 0) + 1;
+
+    if (!/^\d{10}$/.test(body)) {
+        if (nequiAttempts >= 3) {
+            conv.resetConversation(from);
+            await client.sendMessage(from, "Parece que hay problemas con el número. Para continuar, por favor regresa al menú principal enviando un mensaje.");
+        } else {
+            data.nequiAttempts = nequiAttempts;
+            await client.sendMessage(from, `El número de teléfono debe tener 10 dígitos. Por favor, inténtalo de nuevo (intentos restantes: ${3 - nequiAttempts}).`);
+        }
+        return;
+    }
+
+    data.nequiNumber = body;
+    conv.setConversationState(from, "nequi_envio_comprobante");
+    await client.sendMessage(from, "Perfecto. Ahora envíame el comprobante de pago (una foto o captura de pantalla).");
+
+    // Iniciar temporizador
+    setTimeout(async () => {
+        if (conv.getConversationState(from) === "nequi_envio_comprobante") {
+            await client.sendMessage(from, "¿Todo bien con el pago? Recuerda enviarme el comprobante o puedes regresar al menú principal.");
+        }
+    }, 3 * 60 * 1000); // 3 minutos
+}
+async function handleNequiEnvioComprobante(from, msg, client) {
+    if (!msg.hasMedia) {
+        await client.sendMessage(from, "Por favor, envía una imagen como comprobante.");
+        return;
+    }
+
+    let media;
+    try {
+        media = await msg.downloadMedia();
+    } catch (e) {
+        console.error("Error al descargar media:", e);
+        await client.sendMessage(from, "Hubo un problema al procesar tu comprobante. Por favor, intenta enviarlo de nuevo.");
+        return; // Detiene la ejecución si la descarga falla
+    }
+    
+    if (!media) {
+        await client.sendMessage(from, "No pude procesar el archivo. ¿Puedes intentar enviarlo de nuevo?");
+        return;
+    }
+    // --- FIN DEL MANEJO DE ERRORES ---
+
+    const data = conv.getUserData(from);
+    const { total } = getCartSummary(data.cart);
+
+    conv.setConversationState(from, "nequi_verificacion");
+    await client.sendMessage(from, "Recibí tu comprobante. ¡Un momento mientras lo verifico!");
+
+    // Guardar la información para el admin
+    const verificationId = await adminService.logPaymentForVerification({
+        clientNumber: from,
+        clientName: data.nombre,
+        orderItems: getCartSummary(data.cart).lines.join(', '),
+        amount: total,
+        paymentMethod: 'Nequi',
+        timestamp: new Date().toISOString()
+    });
+
+    // Enviar notificación al admin
+    const adminMessage = `📌 *Nuevo Pago Nequi por Verificar*\n\n` +
+        `• *Cliente:* ${data.nombre} (${from.replace(/@c.us/g, '')})\n` +
+        `• *Pedido:* ${getCartSummary(data.cart).lines.join(', ')}\n` +
+        `• *Monto:* ${formatPrice(total)}\n` +
+        `• *Comprobante:*`;
+
+    await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, adminMessage);
+    await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, media);
+    await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, `ID de Verificación: ${verificationId}\n\n➡️ *Opciones:*\n1. Confirmar\n2. Denegar`);
+
+    // Iniciar temporizador para la respuesta del admin
+    setTimeout(async () => {
+        const isPending = await adminService.isVerificationPending(verificationId);
+        if (isPending) {
+            await client.sendMessage(from, "El administrador está tardando un poco en verificar tu pago. Te notificaré tan pronto como haya una respuesta.");
+        }
+    }, 5 * 60 * 1000); // 5 minutos
+}
+async function handlePagoDenegado(from, body, client) {
+    if (body === "1") {
+        conv.setConversationState(from, "nequi_envio_comprobante");
+        await client.sendMessage(from, "Por favor, reenvía el comprobante de pago.");
+    } else if (body === "2") {
+        conv.resetConversation(from);
+        await client.sendMessage(from, "Has vuelto al menú principal. Envía un mensaje para comenzar.");
+    } else if (body === "3") {
+        conv.setConversationState(from, "hablar_con_agente");
+        await client.sendMessage(from, "Un momento, te comunicaré con un agente.");
+        // Lógica para notificar al agente
+    } else {
+        await client.sendMessage(from, "Por favor, elige una de las opciones: 1, 2 o 3.");
     }
 }
 
@@ -453,6 +556,9 @@ module.exports = {
     nombre: handleNombre,
     direccion: handleDireccion,
     metodo_pago: handleMetodoPago,
+    nequi_pago: handleNequiPago,
+    nequi_envio_comprobante: handleNequiEnvioComprobante,
+    pago_denegado: handlePagoDenegado,
     paga_con: handlePagaCon,
     confirmacion: handleConfirmacion
 };
