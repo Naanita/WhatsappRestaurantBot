@@ -206,17 +206,25 @@ async function showResumen(from, client, withInstructions = true) {
     const data = conv.getUserData(from);
     const { lines, total } = getCartSummary(data.cart);
     let resumen = "✅ ¡Listo! ✨ Aquí tienes el *resumen de tu pedido*:\n\n" +
-        lines.join("\n") +
+        (lines.length > 0 ? lines.join("\n") : "") +
         `\n\n💰 *TOTAL:* ${formatPrice(total)}`;
 
     if (withInstructions && data.instrucciones) {
         resumen += `\n\n📝 *Instrucciones:* "${data.instrucciones}"`;
     }
 
-    resumen += "\n\n¿Qué deseas hacer?\n\n" +
-        "*1.* Modificar mi pedido ✏️\n" +
-        "*2.* Añadir instrucciones especiales 📝\n" +
-        "*3.* Confirmar y continuar ✅";
+    if (data.cart.length > 0) {
+        resumen += "\n\n¿Qué deseas hacer?\n\n" +
+            "*1.* Modificar mi pedido ✏️\n" +
+            "*2.* Añadir instrucciones especiales 📝\n" +
+            "*3.* Agregar algo más\n" +
+            "*4.* Confirmar y continuar ✅";
+    } else {
+        resumen += "\n\n¿Qué deseas hacer?\n\n" +
+            "*1.* Modificar mi pedido ✏️\n" +
+            "*2.* Añadir instrucciones especiales 📝\n" +
+            "*3.* Confirmar y continuar ✅";
+    }
 
     conv.setConversationState(from, "resumen");
     await client.sendMessage(from, resumen);
@@ -224,29 +232,43 @@ async function showResumen(from, client, withInstructions = true) {
 
 async function handleResumen(from, body, client) {
     const data = conv.getUserData(from);
-    if (body === "1") {
-        if (!data.cart.length) {
-            await client.sendMessage(from, "⚠️ Tu carrito está vacío.");
-            return;
-        }
-        let modMsg = "✏️ ¿Qué ítem deseas modificar?\n";
-        data.cart.forEach((item, i) => { modMsg += `*${i + 1}.* ${item.qty}x ${item.name}\n`; });
-        modMsg += "\n*0.* Cancelar";
-        conv.setConversationState(from, "modificar");
-        await client.sendMessage(from, modMsg);
-    } else if (body === "2") {
-        conv.setConversationState(from, "instrucciones");
-        await client.sendMessage(from, "✍️ Escribe las instrucciones para tu pedido (ej: sin cebolla, extra queso).");
-    } else if (body === "3") {
-        if (data.historialExists && data.nombre) {
-            conv.setConversationState(from, "direccion");
-            await client.sendMessage(from, `🏡 ¡Perfecto, *${data.nombre}*! Por favor, indícame la dirección completa para la entrega.`);
+    if (data.cart.length > 0) {
+        if (body === "1") {
+            let modMsg = "✏️ ¿Qué ítem deseas modificar?\n";
+            data.cart.forEach((item, i) => { modMsg += `*${i + 1}.* ${item.qty}x ${item.name}\n`; });
+            modMsg += "\n*0.* Cancelar";
+            conv.setConversationState(from, "modificar");
+            await client.sendMessage(from, modMsg);
+        } else if (body === "2") {
+            conv.setConversationState(from, "instrucciones");
+            await client.sendMessage(from, "✍️ Escribe las instrucciones para tu pedido (ej: sin cebolla, extra queso).");
+        } else if (body === "3") {
+            // "Agregar algo más"
+            conv.setConversationState(from, "menu");
+            await client.sendMessage(from, data.menuMsg);
+        } else if (body === "4") {
+            if (data.historialExists && data.nombre) {
+                conv.setConversationState(from, "direccion");
+                await client.sendMessage(from, `🏡 ¡Perfecto, *${data.nombre}*! Por favor, indícame la dirección completa para la entrega.`);
+            } else {
+                conv.setConversationState(from, "nombre");
+                await client.sendMessage(from, "🧾 Para finalizar, ¿a nombre de quién registramos el pedido?");
+            }
         } else {
-            conv.setConversationState(from, "nombre");
-            await client.sendMessage(from, "🧾 Para finalizar, ¿a nombre de quién registramos el pedido?");
+            await client.sendMessage(from, "⚠️ Por favor selecciona una opción válida (1, 2, 3 o 4).");
         }
     } else {
-        await client.sendMessage(from, "⚠️ Por favor selecciona una opción válida (1, 2 o 3).");
+        // Cart is empty
+        await client.sendMessage(from, "Tu carrito está vacío. Te enviaré al menú principal para que puedas agregar productos.");
+        conv.setConversationState(from, "menu");
+        if (!data.menuMsg) {
+            const { menuMsg, menuPrincipal, paraPicar, menuPrincipalCount } = await menuService.buildFullMenu();
+            data.menuMsg = menuMsg;
+            data.menuPrincipal = menuPrincipal;
+            data.paraPicar = paraPicar;
+            data.menuPrincipalCount = menuPrincipalCount;
+        }
+        await client.sendMessage(from, data.menuMsg);
     }
 }
 

@@ -8,9 +8,9 @@ const { MessageMedia } = require("whatsapp-web.js");
  * @returns {string} - El precio formateado, ej: "$ 10.000".
  */
 function formatPrice(price) {
-    if (!price) return "";
+    if (price === null || price === undefined) return "";
     let num = price.toString().replace(/\D/g, "");
-    if (!num) return "";
+    if (num === '') return "";
     return "$ " + Number(num).toLocaleString("es-CO");
 }
 
