@@ -54,7 +54,6 @@ async function handleInicio(from, body, client) {
     }
 }
 
-
 async function handleConsultaEstado(from, body, client) {
     const orderCode = body.toUpperCase().replace(/\s/g, "");
     if (!/^[A-Z]{3}-\d{3}$/.test(orderCode)) {
@@ -77,7 +76,6 @@ async function handleConsultaEstado(from, body, client) {
     }
     conv.resetConversation(from);
 }
-
 
 async function handleMenu(from, body, client) {
     const data = conv.getUserData(from);
@@ -122,7 +120,6 @@ async function handleCantidad(from, body, client, itemType) {
     await client.sendMessage(from, "🍽️ ¿Deseas ordenar algo más de nuestro menú?\n*1.* Sí\n*2.* No");
 }
 
-
 async function handleAgregarMas(from, body, client) {
     const data = conv.getUserData(from);
     if (body === "1") {
@@ -135,7 +132,6 @@ async function handleAgregarMas(from, body, client) {
         await client.sendMessage(from, "⚠️ Por favor responde solo con *1* (Sí) o *2* (No).");
     }
 }
-
 
 async function handleOfrecerBebidas(from, body, client) {
     if (body === "1") {
@@ -191,7 +187,6 @@ async function handleCantidadBebida(from, body, client) {
     await client.sendMessage(from, "🥤 ¿Deseas añadir otra bebida?\n*1.* Sí\n*2.* No");
 }
 
-
 async function handleAgregarBebida(from, body, client) {
     const data = conv.getUserData(from);
     if (body === '1') {
@@ -206,7 +201,6 @@ async function handleAgregarBebida(from, body, client) {
         await client.sendMessage(from, "⚠️ Por favor responde solo con *1* (Sí) o *2* (No).");
     }
 }
-
 
 async function showResumen(from, client, withInstructions = true) {
     const data = conv.getUserData(from);
@@ -359,7 +353,6 @@ async function handlePagaCon(from, body, client) {
     await handleConfirmacion(from, client);
 }
 
-
 async function handleConfirmacion(from, client) {
     const data = conv.getUserData(from);
     const { lines, total } = getCartSummary(data.cart);
@@ -416,7 +409,6 @@ async function handleConfirmacion(from, client) {
     await historyService.updateUserHistorial(from, data.nombre);
     conv.resetConversation(from);
 }
-
 
 // --- Exportación de Manejadores ---
 

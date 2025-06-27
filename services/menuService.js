@@ -53,7 +53,6 @@ async function buildFullMenu() {
     const row = rowsMenu[i];
     const cell = sheetMenu.getCell(i + 1, 0);
     const color = cell.backgroundColor || {};
-    // CORRECCIÓN: Usar _rawData para acceder por índice de columna
     const item = {
       name: row.get(sheetMenu.headerValues[0]),
       price: Number(row.get(sheetMenu.headerValues[1])),
@@ -68,13 +67,11 @@ async function buildFullMenu() {
   const allMenuItems = [...plancha, ...ahumados, ...(isSunday() ? domingo : []), ...normales];
 
   const rowsPicar = await sheetPicar.getRows();
-  // CORRECCIÓN: Usar _rawData para acceder por índice de columna
   const paraPicar = rowsPicar.map((r) => ({
     name: r.get(sheetPicar.headerValues[0]),
     price: Number(r.get(sheetPicar.headerValues[1])),
   }));
 
-  // (El resto de la función para construir el mensaje sigue igual)
   let menuMsg = "¡Genial! 🎉 Aquí te comparto nuestro menú:\n\n";
   let idx = 1;
 

@@ -13,7 +13,6 @@ async function getOrderSheet() {
 async function saveOrderState(orderData) {
   const { sheet } = await getOrderSheet();
   const { fecha, hora } = getColombiaDateAndTime();
-  // CORRECCIÓN: Se mantiene el uso de nombres de encabezado porque estos son fijos y controlados por el bot.
   await sheet.addRow({
     "# ORDEN": orderData.orderCode,
     FECHA: fecha,
@@ -33,12 +32,10 @@ async function getOrderFullInfo(orderCode) {
   const rows = await sheet.getRows();
   const normalizedOrderCode = orderCode.toUpperCase().replace(/\s/g, "");
   
-  // CORRECCIÓN: Usar _rawData[0] para buscar, igual que el código original.
   const row = rows.find(r => (r.get(sheet.headerValues[0]) || "").toUpperCase().replace(/\s/g, "") === normalizedOrderCode);
 
   if (!row) return null;
 
-  // CORRECCIÓN: Usar los nombres de encabezado definidos. Esto es más seguro aquí.
   return {
     "# ORDEN": row.get("# ORDEN"),
     FECHA: row.get("FECHA"),
@@ -56,7 +53,6 @@ async function getOrderFullInfo(orderCode) {
 async function generateUniqueOrderCode() {
   const { sheet } = await getOrderSheet();
   const rows = await sheet.getRows();
-  // CORRECCIÓN: Usar el primer encabezado para obtener los códigos existentes.
   const existingCodes = new Set(rows.map(r => (r.get(sheet.headerValues[0]) || "").toUpperCase()));
   let code;
   let exists;

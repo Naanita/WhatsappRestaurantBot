@@ -19,7 +19,6 @@ async function getUserHistorial(numero) {
   const sheet = await getHistorialSheet();
   const rows = await sheet.getRows();
   
-  // CORRECCIÓN: Usar el primer encabezado ("NUMERO") para buscar.
   const row = rows.find(r => r.get(sheet.headerValues[0]) === numero);
 
   if (!row) return null;
@@ -35,7 +34,7 @@ async function updateUserHistorial(numero, nombre) {
   const sheet = await getHistorialSheet();
   const rows = await sheet.getRows();
   
-  // CORRECCIÓN: Usar el primer encabezado ("NUMERO") para buscar.
+
   let row = rows.find(r => r.get(sheet.headerValues[0]) === numero);
 
   if (row) {
@@ -46,7 +45,7 @@ async function updateUserHistorial(numero, nombre) {
     }
     await row.save();
   } else {
-    // CORRECCIÓN: Crear la fila usando los nombres de encabezado definidos.
+
     await sheet.addRow({
       "NUMERO": numero,
       "NOMBRE DE USUARIO": nombre,
