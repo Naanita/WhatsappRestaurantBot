@@ -43,7 +43,9 @@ async function startBot() {
         await client.initialize();
         console.log("Client initialized successfully");
     } catch (err) {
-        console.error("Error during client initialization:", err);
+        console.error("Fatal Error during client initialization:", err);
+        // Si la inicialización falla, el bot no puede continuar.
+        process.exit(1);
     }
 }
 

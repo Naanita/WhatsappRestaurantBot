@@ -8,7 +8,7 @@ const conv = require("../utils/conversation");
 const menuService = require("../services/menuService");
 const orderService = require("../services/orderService");
 const historyService = require("../services/historyService");
-const adminService = require("../services/adminService"); // Importamos el nuevo servicio
+const adminService = require("../services/adminService"); 
 const path = require("path");
 const fs = require("fs");
 const { MessageMedia } = require("whatsapp-web.js");
@@ -400,9 +400,6 @@ async function handleNequiEnvioComprobante(from, msg, client) {
     }
 
     try {
-        // --- CÓDIGO CORRECTO CON LA LIBRERÍA ACTUALIZADA ---
-        // Ahora que la librería está actualizada, downloadMedia() debe funcionar
-        // para descargar la imagen en ALTA CALIDAD.
         const media = await msg.downloadMedia();
 
         // Verificación por si la descarga falla por alguna razón
