@@ -6,7 +6,9 @@
     "google-auth-library": "^9.15.1",
     "google-spreadsheet": "^4.1.4",
     "pdfkit": "^0.17.1",
+    "puppeteer": "^24.11.0",
     "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.30.0"
+    "uuid": "^11.1.0",
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main"
   }
 }

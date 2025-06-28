@@ -392,61 +392,67 @@ async function handleNequiPago(from, body, client) {
         }
     }, 3 * 60 * 1000); // 3 minutos
 }
+
 async function handleNequiEnvioComprobante(from, msg, client) {
     if (!msg.hasMedia) {
         await client.sendMessage(from, "Por favor, envía una imagen como comprobante.");
         return;
     }
 
-    let media;
     try {
-        media = await msg.downloadMedia();
-    } catch (e) {
-        console.error("Error al descargar media:", e);
-        await client.sendMessage(from, "Hubo un problema al procesar tu comprobante. Por favor, intenta enviarlo de nuevo.");
-        return; // Detiene la ejecución si la descarga falla
-    }
-    
-    if (!media) {
-        await client.sendMessage(from, "No pude procesar el archivo. ¿Puedes intentar enviarlo de nuevo?");
-        return;
-    }
-    // --- FIN DEL MANEJO DE ERRORES ---
+        // --- CÓDIGO CORRECTO CON LA LIBRERÍA ACTUALIZADA ---
+        // Ahora que la librería está actualizada, downloadMedia() debe funcionar
+        // para descargar la imagen en ALTA CALIDAD.
+        const media = await msg.downloadMedia();
 
-    const data = conv.getUserData(from);
-    const { total } = getCartSummary(data.cart);
-
-    conv.setConversationState(from, "nequi_verificacion");
-    await client.sendMessage(from, "Recibí tu comprobante. ¡Un momento mientras lo verifico!");
-
-    // Guardar la información para el admin
-    const verificationId = await adminService.logPaymentForVerification({
-        clientNumber: from,
-        clientName: data.nombre,
-        orderItems: getCartSummary(data.cart).lines.join(', '),
-        amount: total,
-        paymentMethod: 'Nequi',
-        timestamp: new Date().toISOString()
-    });
-
-    // Enviar notificación al admin
-    const adminMessage = `📌 *Nuevo Pago Nequi por Verificar*\n\n` +
-        `• *Cliente:* ${data.nombre} (${from.replace(/@c.us/g, '')})\n` +
-        `• *Pedido:* ${getCartSummary(data.cart).lines.join(', ')}\n` +
-        `• *Monto:* ${formatPrice(total)}\n` +
-        `• *Comprobante:*`;
-
-    await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, adminMessage);
-    await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, media);
-    await client.sendMessage(process.env.ADMIN_WHATSAPP_NUMBER, `ID de Verificación: ${verificationId}\n\n➡️ *Opciones:*\n1. Confirmar\n2. Denegar`);
-
-    // Iniciar temporizador para la respuesta del admin
-    setTimeout(async () => {
-        const isPending = await adminService.isVerificationPending(verificationId);
-        if (isPending) {
-            await client.sendMessage(from, "El administrador está tardando un poco en verificar tu pago. Te notificaré tan pronto como haya una respuesta.");
+        // Verificación por si la descarga falla por alguna razón
+        if (!media) {
+            await client.sendMessage(from, "No pude procesar el archivo que enviaste. ¿Puedes intentar enviarlo de nuevo?");
+            return;
         }
-    }, 5 * 60 * 1000); // 5 minutos
+
+        const data = conv.getUserData(from);
+        const { lines, total } = getCartSummary(data.cart);
+
+        conv.setConversationState(from, "nequi_verificacion");
+        await client.sendMessage(from, "Recibí tu comprobante en alta calidad. ¡Un momento mientras lo verifico!");
+
+        // Guardar la información para el log del admin
+        const verificationId = await adminService.logPaymentForVerification({
+            clientNumber: from,
+            clientName: data.nombre,
+            orderItems: lines.join(', '),
+            amount: total,
+            paymentMethod: 'Nequi',
+            timestamp: new Date().toISOString()
+        });
+        
+        const adminNumber = process.env.ADMIN_WHATSAPP_NUMBER;
+        
+        // Construimos el texto que irá como pie de foto (caption)
+        const caption = `📌 *Nuevo Pago Nequi por Verificar*\n\n` +
+                      `• *Cliente:* ${data.nombre} (${from.replace(/@c.us/g, '')})\n` +
+                      `• *Pedido:* ${lines.join(', ')}\n` +
+                      `• *Monto:* ${formatPrice(total)}`;
+
+        // Enviamos la imagen en alta calidad (media) con su texto (caption)
+        await client.sendMessage(adminNumber, media, { caption: caption });
+        
+        // Enviamos las opciones de respuesta al admin por separado
+        await client.sendMessage(adminNumber, `ID de Verificación: ${verificationId}\n\n➡️ *Opciones:*\n1. Confirmar\n2. Denegar`);
+
+        // Lógica del temporizador (sin cambios)
+        setTimeout(async () => {
+            const isPending = await adminService.isVerificationPending(verificationId);
+            if (isPending) {
+                await client.sendMessage(from, "El administrador está tardando un poco en verificar tu pago. Te notificaré tan pronto como haya una respuesta.");
+            }
+        }, 5 * 60 * 1000);
+
+    } catch (e) {
+        console.error("Error al descargar o procesar el comprobante:", e);
+        await client.sendMessage(from, "Hubo un problema al procesar tu comprobante. Por favor, intenta enviarlo de nuevo.");
+    }
 }
 async function handlePagoDenegado(from, body, client) {
     if (body === "1") {
